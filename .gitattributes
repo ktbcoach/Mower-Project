@@ -1,0 +1,5 @@
+# Keep LF line endings so shell scripts run on the Pi (Linux) regardless of
+# the Windows checkout. Bash fails on CRLF (`\r`) in scripts.
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
