@@ -17,8 +17,9 @@ except ImportError as exc:  # pragma: no cover - exercised only without pyserial
         "    pip install pyserial"
     ) from exc
 
-# Factory default per the DMS-SGP02 manual: 9600 8N1.
-DEFAULT_PORT = "/dev/serial0"
+# The Sequent Microsystems Multi-IO HAT routes RS232 to GPIO12/GPIO13 (UART5),
+# which appears as /dev/ttyAMA5 after enabling dtoverlay=uart5 in config.txt.
+DEFAULT_PORT = "/dev/ttyAMA5"
 DEFAULT_BAUD = 9600
 
 # Baud rates the unit supports (manual, Setting Baud Rate).

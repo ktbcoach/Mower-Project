@@ -1,4 +1,4 @@
-# Hardware: Watson DMS-SGP02 → RS232 pHAT → Raspberry Pi 4
+# Hardware: Watson DMS-SGP02 → Sequent Microsystems Multi-IO HAT → Raspberry Pi 4
 
 Reference notes distilled from the *DMS-SGP02 Owner's Manual* (Rev K, 03/22/2018).
 Keep the PDF handy — this is a summary of the parts that matter for data collection.
@@ -26,8 +26,16 @@ damage the unit.
 
 ## Serial wiring (the part that reaches the Pi)
 
-The unit talks RS-232 on a **9-pin female** D-Sub. The RS232 pHAT's MAX3232
-converts those ±12 V levels to the Pi's 3.3 V UART on GPIO14/15 → `/dev/serial0`.
+The unit talks RS-232 on a **9-pin female** D-Sub. The Multi-IO HAT's RS232
+transceiver converts those ±12 V levels to the Pi's 3.3 V UART on
+**GPIO12/GPIO13 (UART5) → `/dev/ttyAMA5`**.
+
+**Multi-IO HAT wiring notes:**
+- Connect to the **upper** DB9 connector on the HAT (silkscreen is reversed —
+  upper = RS232, lower = RS485).
+- The RX jumper on J2 must be installed (routes GPIO13 to the RS232 RX line).
+- Enable the UART5 overlay in `/boot/firmware/config.txt`: `dtoverlay=uart5`
+  (the `setup_pi.sh` script does this).
 
 DMS-SGP02 9-pin serial connector (manual, Figure 3):
 
