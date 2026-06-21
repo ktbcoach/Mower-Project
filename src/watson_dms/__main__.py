@@ -41,7 +41,13 @@ def _make_controls(args: argparse.Namespace):
     """Build the logging-control backend (HAT button/LEDs or Pi GPIO)."""
     if args.source == "hat":
         from .hat_controls import HatLoggingControls
-        return HatLoggingControls(stack=args.hat_stack, status_led=args.led)
+        return HatLoggingControls(
+            stack=args.hat_stack,
+            status_led=args.led,
+            input_mode=args.hat_input,
+            contact_channel=args.contact_channel,
+            contact_invert=args.contact_invert,
+        )
     from .switch import LoggingControls
     led_pin = None if args.no_led else args.led_pin
     return LoggingControls(
@@ -104,7 +110,7 @@ def cmd_parse(args: argparse.Namespace) -> int:
 
 
 def cmd_hat_test(args: argparse.Namespace) -> int:
-    """Cycle the HAT's LEDs and report button presses (wiring/ID check)."""
+    """Cycle the HAT LEDs; report dry-contact and button activity (wiring check)."""
     import time
     try:
         import multiio
@@ -133,44 +139,44 @@ def cmd_hat_test(args: argparse.Namespace) -> int:
     except OSError:
         pass
 
-    print(f"\n# Press/hold the HAT button — watching {args.seconds:.0f}s (Ctrl-C to stop).")
-    print("#   live  = get_button()  (instantaneous state, bit 0)")
-    print("#   latch = get_button_latch()  (firmware latch, bit 1)")
-    edges = 0       # rising edges of the live state (what the logger uses)
-    latches = 0     # firmware latch events
+    print(f"\n# Watching {args.seconds:.0f}s — flip the dry-contact switch and/or "
+          "press the button (Ctrl-C to stop).")
+    print("#   OPTO = get_all_opto() bitmask (dry-contact inputs; the logger uses ch1)")
+    print("#   button = get_button() live state")
+    edges = 0          # button rising edges
+    opto_changes = 0   # dry-contact/opto changes
     last_live = None
+    last_opto = None
     deadline = time.monotonic() + args.seconds
     try:
         while time.monotonic() < deadline:
             try:
                 live = bool(mio.get_button())
-                latched = bool(mio.get_button_latch())
+                opto = mio.get_all_opto()
             except OSError as exc:
                 print(f"  I2C read error: {exc}")
                 time.sleep(0.2)
                 continue
+            if opto != last_opto:
+                opto_changes += 1
+                print(f"  OPTO=0x{opto:02x}  "
+                      f"ch1={opto & 1} ch2={(opto >> 1) & 1} "
+                      f"ch3={(opto >> 2) & 1} ch4={(opto >> 3) & 1}")
+                last_opto = opto
             if live != last_live:
                 if live:
                     edges += 1
-                    print(f"  live: PRESSED   (rising edge #{edges})")
-                    mio.set_led(1, 1)
+                    print(f"  button PRESSED (rising edge #{edges})")
                 else:
-                    print("  live: released")
-                    mio.set_led(1, 0)
+                    print("  button released")
                 last_live = live
-            if latched:
-                latches += 1
-                print(f"  latch event #{latches}")
             time.sleep(0.03)
     except KeyboardInterrupt:
         pass
-    print(f"# Done: {edges} live press(es), {latches} firmware-latch event(s).")
-    if edges and not latches:
-        print("# -> Button works via get_button(); firmware latch unused. "
-              "The logger uses get_button(), so you're good.")
-    elif not edges and not latches:
-        print("# -> No button activity seen. Check the HAT stack address "
-              "(--hat-stack) and `i2cdetect -y 1`.")
+    print(f"# Done: {opto_changes} dry-contact change(s), {edges} button press(es).")
+    if not opto_changes and not edges:
+        print("# -> No input activity seen. Check the HAT stack address "
+              "(--hat-stack) and wiring.")
     return 0
 
 
@@ -222,6 +228,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Multi-IO HAT stack address (default: 0)")
     sw.add_argument("--led", type=int, default=1,
                     help="HAT onboard LED number for status (default: 1)")
+    sw.add_argument("--hat-input", choices=("contact", "button"), default="contact",
+                    help="HAT input: 'contact' = dry-contact/opto channel (level, "
+                         "default), 'button' = onboard momentary push button")
+    sw.add_argument("--contact-channel", type=int, default=1,
+                    help="dry-contact/opto input channel, 1-based (default: 1)")
+    sw.add_argument("--contact-invert", action="store_true",
+                    help="invert: OPEN contact = logging ON (default: CLOSED = ON)")
     # GPIO source (--source gpio):
     sw.add_argument("--switch-pin", type=int, default=16,
                     help="[gpio] BCM pin of the switch-to-ground (default: 16)")
@@ -234,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
     co.set_defaults(func=cmd_collect)
 
     ht = sub.add_parser("hat-test",
-                        help="identify Multi-IO HAT LED numbers and test the button")
+                        help="identify HAT LED numbers and test the dry-contact/button inputs")
     ht.add_argument("--hat-stack", type=int, default=0,
                     help="Multi-IO HAT stack address (default: 0)")
     ht.add_argument("--leds", type=int, default=4,

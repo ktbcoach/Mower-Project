@@ -95,30 +95,38 @@ accuracy depends on antenna spacing (0.5° at 0.5 m → 0.07° at 5 m).
   nearby higher than the ground plane.
 - Latitude/longitude are reported at the **aft** antenna.
 
-## Logging button & status LED
+## Logging switch & status LED
 
-**Primary: the Multi-IO HAT's onboard button + LEDs — no extra wiring.**
-The HAT exposes its push button and LEDs over I2C via the `multiio` library.
+**Primary: a switch on the HAT's dry-contact input + an onboard LED — read over I2C.**
+A toggle switch is wired between **dry-contact input 1 and GND** on the HAT.
+The library reads it as opto/dry-contact **channel 1** (`get_opto(1)`).
 
-- **Button (momentary):** each press **toggles** logging on/off. The HAT
-  firmware debounces and latches presses (`get_button_latch()`), so a press is
-  never missed; the service opens a new log session on the press that turns
-  logging on and closes it on the next press.
+- **Switch (level):** CLOSED = logging ON, OPEN = idle — like an ordinary toggle
+  switch. Each ON→OFF cycle is one timestamped log session. Channel is set with
+  `--contact-channel` (default 1); flip the sense with `--contact-invert` if your
+  wiring reads inverted.
 - **Status LED** (`--led` number, default 1): **off** = idle ·
   **blinking** = logging but still searching for a fix · **solid** = logging
   with a GPS fix. Blink is software-timed (the HAT has no hardware blink).
-- Needs I2C enabled (`setup_pi.sh` does this) and the `multiio` library.
+- Needs I2C enabled (`setup_pi.sh` does this) and the `SMmultiio` library.
 - The board's stack address (`--hat-stack`, default 0) is set by the HAT's
   address jumpers; leave at 0 for a single board.
 
-Run `python -m watson_dms hat-test` to map the LED numbers (it lights each in
-turn) and confirm the button registers presses.
+> Note: the HAT's I2C slave is an onboard microcontroller and **does not appear
+> in `i2cdetect`'s default scan** — that's normal. If LEDs respond in
+> `hat-test`, I2C is working.
 
-**Alternative: a switch + LED on Pi GPIO (`--source gpio`).**
-Because the HAT uses only I2C + UART5, the GPIO header is free if you'd rather
-wire your own. Toggle switch between **GPIO16 (pin 36)** and GND (closed = ON,
-internal pull-up); LED on **GPIO26 (pin 37)** through a ~330 Ω resistor to GND.
-Same off/blink/solid behavior. Avoid GPIO2/3 (I2C) and GPIO12/13/14/15 (UARTs).
+Run `python -m watson_dms hat-test` to map the LED numbers (it lights each in
+turn) and confirm the dry-contact input toggles (`OPTO ch1` flips with the switch).
+
+**Other input options:**
+- **Onboard push button** (`--hat-input button`): momentary — each press toggles
+  logging. (Note: on some board firmware the button state isn't exposed over I2C;
+  the dry-contact input is the reliable choice.)
+- **Switch + LED on Pi GPIO** (`--source gpio`): the GPIO header is free (HAT uses
+  only I2C + UART5). Toggle switch between **GPIO16 (pin 36)** and GND (closed =
+  ON, internal pull-up); LED on **GPIO26 (pin 37)** via a ~330 Ω resistor to GND.
+  Avoid GPIO2/3 (I2C) and GPIO12/13/14/15 (UARTs).
 
 ## Command mode (changing baud, channels, heading mode)
 

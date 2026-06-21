@@ -20,7 +20,7 @@ gps-collector/
 │   ├── serial_reader.py  # pyserial wrapper, CR-terminated line reader
 │   ├── capture.py        # raw dump + baud-rate auto-detect (run this first)
 │   ├── logger.py         # CSV and GPX writers
-│   ├── hat_controls.py   # Multi-IO HAT button + LEDs over I2C (default)
+│   ├── hat_controls.py   # Multi-IO HAT dry-contact input + LEDs over I2C (default)
 │   ├── switch.py         # alt: switch + LED wired to Pi GPIO (gpiozero)
 │   ├── collect.py        # collection loops (continuous + button/switch-gated)
 │   └── __main__.py       # `python -m watson_dms` CLI
@@ -79,37 +79,42 @@ python -m watson_dms capture --seconds 10 > raw.txt
 python -m watson_dms parse raw.txt
 ```
 
-## Auto-start at boot with the HAT button
+## Auto-start at boot with a dry-contact switch
 
-The field setup: the Pi boots straight into the logger, and the **Multi-IO HAT's
-onboard push button** starts/stops recording — no extra wiring. A HAT LED shows
-status. See [`docs/HARDWARE.md`](docs/HARDWARE.md#logging-button--status-led).
+The field setup: the Pi boots straight into the logger, and a toggle switch on
+the HAT's **dry-contact input 1** starts/stops recording. A HAT LED shows status.
+See [`docs/HARDWARE.md`](docs/HARDWARE.md#logging-switch--status-led).
 
 ```bash
-# First, map the HAT's LED numbers and confirm the button works:
+# First, map the HAT's LED numbers and confirm the switch toggles OPTO ch1:
 python -m watson_dms hat-test
 
 # Install + enable the service (auto-starts on every boot).
 sudo bash scripts/install_service.sh
-# Override if needed (LED = onboard LED number, stack = HAT address):
-#   sudo HAT_STACK=0 LED=1 PORT=/dev/ttyAMA5 BAUD=9600 \
+# Override if needed (LED = onboard LED, stack = HAT address, contact = channel):
+#   sudo HAT_STACK=0 LED=1 CONTACT_CH=1 PORT=/dev/ttyAMA5 BAUD=9600 \
 #        bash scripts/install_service.sh
 
 systemctl status watson-dms        # check it's running
 journalctl -u watson-dms -f        # watch session start/stop live
 ```
 
-Behavior: the service stays up and synced to the serial stream. **Press the
-button** to start logging — it opens a fresh `logs/dms-<timestamp>.csv` + `.gpx`;
-**press again** to stop (flush + close). The status **LED** is off when idle,
-blinks while searching for a fix, and is solid once logging with a GPS fix. CSV
-is flushed every ~2 s so an abrupt power-off loses at most a couple of seconds.
+Behavior: the service stays up and synced to the serial stream. **Close the
+switch** to start logging — it opens a fresh `logs/dms-<timestamp>.csv` + `.gpx`;
+**open it** to stop (flush + close). The status **LED** is off when idle, blinks
+while searching for a fix, and is solid once logging with a GPS fix. CSV is
+flushed every ~2 s so an abrupt power-off loses at most a couple of seconds.
 
-To try button mode by hand (without the service):
+If logging runs *inverted* (records when the switch is open), add
+`--contact-invert` to the command (or to the service's `ExecStart` line).
+
+To try it by hand (without the service):
 
 ```bash
-python -m watson_dms collect --switch              # --source hat is the default
-# or, to use a switch wired to Pi GPIO instead of the HAT:
+python -m watson_dms collect --switch       # --source hat, dry-contact ch1, are defaults
+# onboard button instead of the switch:
+python -m watson_dms collect --switch --hat-input button
+# or a switch wired to Pi GPIO instead of the HAT:
 python -m watson_dms collect --switch --source gpio --switch-pin 16 --led-pin 26
 ```
 
@@ -145,8 +150,9 @@ plus invalid-field (asterisk), over-range, and reconfigured-channel cases.
 - [x] Decimal ASCII parser (factory-default channel string) + tests
 - [x] Serial reader, raw capture, baud auto-detect
 - [x] CSV + GPX logging, live collection loop, CLI
-- [x] Button-gated logging + status LED (Multi-IO HAT button/LEDs; GPIO fallback)
+- [x] Switch-gated logging + status LED (HAT dry-contact input/LED; button & GPIO options)
 - [x] systemd service for auto-start at boot
 - [ ] Verify against the real unit on the Pi (run `detect` → `capture`)
-- [ ] Verify HAT button/LED (`hat-test`) + service on the Pi
+- [x] Confirm HAT dry-contact switch toggles OPTO ch1 (`hat-test`)
+- [ ] Install + verify the service on the Pi
 - [ ] Optional: live web/TUI dashboard, MQTT streaming, binary-format support

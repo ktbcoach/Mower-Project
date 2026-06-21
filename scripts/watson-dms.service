@@ -9,11 +9,12 @@ User=__USER__
 # dialout = serial port, i2c = Multi-IO HAT, gpio = optional direct-GPIO source.
 SupplementaryGroups=dialout i2c gpio
 WorkingDirectory=__APPDIR__
-# Button-gated collection: process stays up; the Multi-IO HAT button toggles
-# logging, an onboard LED shows status.
+# Switch-gated collection: process stays up; a dry-contact switch on the
+# Multi-IO HAT (closed = ON) gates logging, an onboard LED shows status.
 ExecStart=__PYTHON__ -m watson_dms collect --switch --source hat \
   --port __PORT__ --baud __BAUD__ \
   --hat-stack __HAT_STACK__ --led __LED__ \
+  --hat-input contact --contact-channel __CONTACT_CH__ \
   --log-dir __APPDIR__/logs --quiet
 Restart=always
 RestartSec=3
