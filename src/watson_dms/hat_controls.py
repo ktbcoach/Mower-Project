@@ -6,17 +6,19 @@ Sequent ``multiio`` library (PyPI: ``SMmultiio``) and I2C enabled.
 Two input modes:
   * ``"contact"`` (default) — a switch on a **dry-contact / opto input** channel
     (read via ``get_opto(channel)``). This is a *level* input: closed = logging
-    ON, like a toggle switch. Robust and the simplest behavior.
+    ON, like a toggle switch.
   * ``"button"`` — the onboard **momentary push button**; each press toggles a
-    logging latch. (Kept as a fallback; the dry-contact input is preferred.)
+    logging latch. (Fallback; the dry-contact input is preferred.)
 
-Status is shown on an onboard LED: off = idle, blink = logging but searching
-for a GPS fix, solid = logging with a fix. (The blink is software-timed; the
-HAT has no hardware blink.)
+Two independent status LEDs:
+  * **GPS LED** (default LED 1): off = no fix · blinking = fix but heading is
+    inertial/track (not dual-GPS) · solid = dual-GPS true-north fix.
+  * **Logging LED** (default LED 2): off = idle · blinking = logging.
 
-Exposes the same interface as :class:`watson_dms.switch.LoggingControls`
-(``logging_on`` property, ``update_indicator``, ``close``) so the collection
-loop is agnostic to which backend drives it.
+LED blinking is software-timed (the HAT has no hardware blink).
+
+Exposes the interface used by the collection loop: ``logging_on`` property,
+``update_indicator(logging, reading)``, and ``close``.
 """
 
 from __future__ import annotations
@@ -24,22 +26,56 @@ from __future__ import annotations
 import time
 
 DEFAULT_STACK = 0          # HAT stack address (jumpers); 0 for a single board
-DEFAULT_STATUS_LED = 1     # onboard LED used for logging status
+DEFAULT_GPS_LED = 1        # onboard LED for GPS fix status
+DEFAULT_LOGGING_LED = 2    # onboard LED for logging status
 DEFAULT_CONTACT_CH = 1     # dry-contact / opto input channel
 
-# LED indicator modes.
+# LED states.
 _OFF, _SOLID, _BLINK = 0, 1, 2
 
 
+class _Led:
+    """One onboard LED with off/solid/blink behavior; blink is software-timed."""
+
+    def __init__(self, write_fn, number: int, period: float):
+        self._write = write_fn
+        self._num = number
+        self._period = period
+        self._mode = None
+        self._on = False
+        self._last = 0.0
+
+    def set(self, mode: int) -> None:
+        now = time.monotonic()
+        if mode != self._mode:
+            self._mode = mode
+            if mode == _OFF:
+                self._on = False
+                self._write(self._num, 0)
+            elif mode == _SOLID:
+                self._on = True
+                self._write(self._num, 1)
+            else:  # entering blink
+                self._on = True
+                self._last = now
+                self._write(self._num, 1)
+            return
+        if mode == _BLINK and now - self._last >= self._period:
+            self._on = not self._on
+            self._write(self._num, 1 if self._on else 0)
+            self._last = now
+
+
 class HatLoggingControls:
-    """Read a HAT input (dry-contact level or button) and drive a status LED.
+    """Read a HAT input (dry-contact level or button) and drive two status LEDs.
 
     Parameters
     ----------
     stack, i2c:
         HAT stack-level address and I2C bus number (1 on a Pi 4).
-    status_led:
-        Onboard LED number used as the logging indicator.
+    gps_led, logging_led:
+        Onboard LED numbers for GPS-fix status and logging status. Pass ``None``
+        for either to leave that LED unused.
     input_mode:
         ``"contact"`` (dry-contact/opto level input, default) or ``"button"``.
     contact_channel:
@@ -47,14 +83,15 @@ class HatLoggingControls:
     contact_invert:
         If True, an OPEN contact means logging ON (default: CLOSED = ON).
     blink_period:
-        Half-period (seconds) of the "searching for fix" blink.
+        Half-period (seconds) of LED blinking.
     """
 
     def __init__(
         self,
         stack: int = DEFAULT_STACK,
         i2c: int = 1,
-        status_led: int = DEFAULT_STATUS_LED,
+        gps_led: int | None = DEFAULT_GPS_LED,
+        logging_led: int | None = DEFAULT_LOGGING_LED,
         input_mode: str = "contact",
         contact_channel: int = DEFAULT_CONTACT_CH,
         contact_invert: bool = False,
@@ -70,8 +107,6 @@ class HatLoggingControls:
             ) from exc
 
         self._mio = multiio.SMmultiio(stack, i2c)
-        self._status_led = status_led
-        self._blink_period = blink_period
         self._input_mode = input_mode
         self._contact_channel = contact_channel
         self._contact_invert = contact_invert
@@ -81,17 +116,20 @@ class HatLoggingControls:
         self._debounce = 0.3
         self._last_toggle = 0.0
         self._last_pressed = False
-        # Contact-mode last-known value (for transient I2C errors).
         self._last_contact = False
 
-        # LED state.
-        self._led_mode = -1
-        self._blink_on = False
-        self._last_blink = 0.0
+        self._gps_led = _Led(self._write_led, gps_led, blink_period) if gps_led else None
+        self._logging_led = (
+            _Led(self._write_led, logging_led, blink_period) if logging_led else None
+        )
 
         if input_mode == "button":
             self._last_pressed = self._read_button()
-        self._write_led(0)
+        # Start both LEDs off.
+        if self._gps_led:
+            self._gps_led.set(_OFF)
+        if self._logging_led:
+            self._logging_led.set(_OFF)
 
     # --- input ----------------------------------------------------------------
 
@@ -103,7 +141,6 @@ class HatLoggingControls:
         return self._read_button_toggle()
 
     def _read_contact(self) -> bool:
-        """Level read of the dry-contact/opto channel (closed = ON by default)."""
         try:
             active = bool(self._mio.get_opto(self._contact_channel))
             self._last_contact = active
@@ -118,7 +155,6 @@ class HatLoggingControls:
             return self._last_pressed
 
     def _read_button_toggle(self) -> bool:
-        """Momentary button: toggle logging on each rising edge (debounced)."""
         pressed = self._read_button()
         now = time.monotonic()
         if pressed and not self._last_pressed and (now - self._last_toggle) > self._debounce:
@@ -127,39 +163,36 @@ class HatLoggingControls:
         self._last_pressed = pressed
         return self._logging
 
-    # --- indicator LED --------------------------------------------------------
+    # --- indicator LEDs -------------------------------------------------------
 
-    def update_indicator(self, logging: bool, has_fix: bool) -> None:
-        """off = idle · solid = logging+fix · blink = logging, searching."""
-        mode = _OFF if not logging else (_SOLID if has_fix else _BLINK)
+    def update_indicator(self, logging: bool, reading) -> None:
+        """Drive the GPS and logging LEDs. Call every loop iteration (animates
+        blinking). ``reading`` is the latest :class:`DmsReading` or ``None``.
+        """
+        if self._gps_led:
+            self._gps_led.set(self._gps_mode(reading))
+        if self._logging_led:
+            self._logging_led.set(_BLINK if logging else _OFF)
 
-        if mode != self._led_mode:
-            self._led_mode = mode
-            if mode == _OFF:
-                self._write_led(0)
-            elif mode == _SOLID:
-                self._write_led(1)
-            else:  # entering blink
-                self._blink_on = True
-                self._last_blink = time.monotonic()
-                self._write_led(1)
-            return
+    @staticmethod
+    def _gps_mode(reading) -> int:
+        if reading is None or not reading.has_gps_fix:
+            return _OFF                       # no position fix
+        if reading.heading_mode == "gps_true_north":
+            return _SOLID                     # dual-antenna GPS fix (label G)
+        return _BLINK                         # fix, but track/inertial heading
 
-        if mode == _BLINK:
-            now = time.monotonic()
-            if now - self._last_blink >= self._blink_period:
-                self._blink_on = not self._blink_on
-                self._write_led(1 if self._blink_on else 0)
-                self._last_blink = now
-
-    def _write_led(self, val: int) -> None:
+    def _write_led(self, number: int, val: int) -> None:
         try:
-            self._mio.set_led(self._status_led, val)
+            self._mio.set_led(number, val)
         except OSError:
             pass  # don't let an I2C hiccup kill collection
 
     def close(self) -> None:
-        self._write_led(0)
+        if self._gps_led:
+            self._gps_led.set(_OFF)
+        if self._logging_led:
+            self._logging_led.set(_OFF)
 
     def __enter__(self) -> "HatLoggingControls":
         return self

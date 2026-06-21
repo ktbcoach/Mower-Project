@@ -105,9 +105,11 @@ The library reads it as opto/dry-contact **channel 1** (`get_opto(1)`).
   switch. Each ON→OFF cycle is one timestamped log session. Channel is set with
   `--contact-channel` (default 1); flip the sense with `--contact-invert` if your
   wiring reads inverted.
-- **Status LED** (`--led` number, default 1): **off** = idle ·
-  **blinking** = logging but still searching for a fix · **solid** = logging
-  with a GPS fix. Blink is software-timed (the HAT has no hardware blink).
+- **GPS LED** (`--gps-led`, default 1): **off** = no fix · **blinking** = fix but
+  heading is inertial/track (not dual-GPS) · **solid** = dual-GPS true-north fix.
+- **Logging LED** (`--logging-led`, default 2): **off** = idle · **blinking** =
+  logging. (Independent of GPS status.)
+- Blink is software-timed (the HAT has no hardware blink).
 - Needs I2C enabled (`setup_pi.sh` does this) and the `SMmultiio` library.
 - The board's stack address (`--hat-stack`, default 0) is set by the HAT's
   address jumpers; leave at 0 for a single board.

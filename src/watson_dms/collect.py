@@ -96,7 +96,7 @@ def collect_switched(
     last_flush = time.monotonic()
 
     _log(f"service up on {port} @ {baud} 8N1; waiting for button/switch")
-    last_has_fix = False
+    last_reading = None
     try:
         # Short timeout + idle ticks so the button is polled (and the LED
         # animates) even when the serial stream goes briefly quiet.
@@ -116,12 +116,12 @@ def collect_switched(
 
                 reading = parse_line(line) if line is not None else None
                 if reading is not None:
-                    last_has_fix = reading.has_gps_fix
+                    last_reading = reading
                     if session is not None and not (fix_only and not reading.has_gps_fix):
                         session.write(reading, _dt.datetime.now(_dt.timezone.utc))
 
-                # Reflect state on the LED every iteration (animates the blink).
-                controls.update_indicator(session is not None, last_has_fix)
+                # Reflect state on the LEDs every iteration (animates blinking).
+                controls.update_indicator(session is not None, last_reading)
 
                 now = time.monotonic()
                 if session is not None and now - last_flush >= _FLUSH_INTERVAL_S:

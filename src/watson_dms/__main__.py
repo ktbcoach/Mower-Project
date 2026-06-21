@@ -43,7 +43,8 @@ def _make_controls(args: argparse.Namespace):
         from .hat_controls import HatLoggingControls
         return HatLoggingControls(
             stack=args.hat_stack,
-            status_led=args.led,
+            gps_led=args.gps_led,
+            logging_led=args.logging_led,
             input_mode=args.hat_input,
             contact_channel=args.contact_channel,
             contact_invert=args.contact_invert,
@@ -226,8 +227,11 @@ def build_parser() -> argparse.ArgumentParser:
     # HAT source (--source hat):
     sw.add_argument("--hat-stack", type=int, default=0,
                     help="Multi-IO HAT stack address (default: 0)")
-    sw.add_argument("--led", type=int, default=1,
-                    help="HAT onboard LED number for status (default: 1)")
+    sw.add_argument("--gps-led", type=int, default=1,
+                    help="HAT LED for GPS status: off=no fix, blink=fix/inertial, "
+                         "solid=dual-GPS fix (default: 1)")
+    sw.add_argument("--logging-led", type=int, default=2,
+                    help="HAT LED for logging status: off=idle, blink=logging (default: 2)")
     sw.add_argument("--hat-input", choices=("contact", "button"), default="contact",
                     help="HAT input: 'contact' = dry-contact/opto channel (level, "
                          "default), 'button' = onboard momentary push button")

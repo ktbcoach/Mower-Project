@@ -13,7 +13,8 @@ WorkingDirectory=__APPDIR__
 # Multi-IO HAT (closed = ON) gates logging, an onboard LED shows status.
 ExecStart=__PYTHON__ -m watson_dms collect --switch --source hat \
   --port __PORT__ --baud __BAUD__ \
-  --hat-stack __HAT_STACK__ --led __LED__ \
+  --hat-stack __HAT_STACK__ \
+  --gps-led __GPS_LED__ --logging-led __LOGGING_LED__ \
   --hat-input contact --contact-channel __CONTACT_CH__ \
   --log-dir __APPDIR__/logs --quiet
 Restart=always

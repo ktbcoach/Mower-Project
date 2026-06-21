@@ -67,14 +67,16 @@ class LoggingControls:
         active = self._switch.is_active  # True when pulled to ground (closed)
         return active if self._closed_is_on else not active
 
-    def update_indicator(self, logging: bool, has_fix: bool) -> None:
-        """Reflect state on the LED: off / solid (fix) / blink (searching).
+    def update_indicator(self, logging: bool, reading) -> None:
+        """Reflect state on the single GPIO LED: off (idle) / blink (logging,
+        searching) / solid (logging with a GPS fix).
 
-        Only acts on state *changes* so a background blink isn't restarted
-        every frame.
+        ``reading`` is the latest :class:`DmsReading` or ``None``. Only acts on
+        state *changes* so a background blink isn't restarted every frame.
         """
         if self._led is None:
             return
+        has_fix = bool(reading is not None and reading.has_gps_fix)
         mode = _OFF if not logging else (_SOLID if has_fix else _BLINK)
         if mode == self._led_mode:
             return

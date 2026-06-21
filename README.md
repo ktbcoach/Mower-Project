@@ -91,8 +91,8 @@ python -m watson_dms hat-test
 
 # Install + enable the service (auto-starts on every boot).
 sudo bash scripts/install_service.sh
-# Override if needed (LED = onboard LED, stack = HAT address, contact = channel):
-#   sudo HAT_STACK=0 LED=1 CONTACT_CH=1 PORT=/dev/ttyAMA5 BAUD=9600 \
+# Override if needed (stack = HAT address, LEDs/contact = channel numbers):
+#   sudo HAT_STACK=0 GPS_LED=1 LOGGING_LED=2 CONTACT_CH=1 PORT=/dev/ttyAMA5 \
 #        bash scripts/install_service.sh
 
 systemctl status watson-dms        # check it's running
@@ -101,9 +101,10 @@ journalctl -u watson-dms -f        # watch session start/stop live
 
 Behavior: the service stays up and synced to the serial stream. **Close the
 switch** to start logging — it opens a fresh `logs/dms-<timestamp>.csv` + `.gpx`;
-**open it** to stop (flush + close). The status **LED** is off when idle, blinks
-while searching for a fix, and is solid once logging with a GPS fix. CSV is
-flushed every ~2 s so an abrupt power-off loses at most a couple of seconds.
+**open it** to stop (flush + close). Two HAT LEDs show status independently:
+**LED 1 (GPS)** off = no fix, blinking = fix but inertial/track heading, solid =
+dual-GPS true-north fix; **LED 2 (logging)** off = idle, blinking = logging. CSV
+is flushed every ~2 s so an abrupt power-off loses at most a couple of seconds.
 
 If logging runs *inverted* (records when the switch is open), add
 `--contact-invert` to the command (or to the service's `ExecStart` line).

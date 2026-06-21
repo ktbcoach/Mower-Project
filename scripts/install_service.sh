@@ -8,7 +8,8 @@
 #     sudo bash scripts/install_service.sh
 #
 # Override defaults with env vars, e.g.:
-#     sudo PORT=/dev/ttyAMA5 BAUD=9600 HAT_STACK=0 LED=1 CONTACT_CH=1 \
+#     sudo PORT=/dev/ttyAMA5 BAUD=9600 HAT_STACK=0 \
+#          GPS_LED=1 LOGGING_LED=2 CONTACT_CH=1 \
 #          bash scripts/install_service.sh
 set -euo pipefail
 
@@ -30,7 +31,8 @@ fi
 PORT="${PORT:-/dev/ttyAMA5}"
 BAUD="${BAUD:-9600}"
 HAT_STACK="${HAT_STACK:-0}"
-LED="${LED:-1}"
+GPS_LED="${GPS_LED:-1}"
+LOGGING_LED="${LOGGING_LED:-2}"
 CONTACT_CH="${CONTACT_CH:-1}"
 
 TEMPLATE="$APPDIR/scripts/watson-dms.service"
@@ -41,7 +43,7 @@ echo "  user       = $RUN_USER"
 echo "  app dir    = $APPDIR"
 echo "  python     = $PYTHON"
 echo "  port/baud  = $PORT @ $BAUD"
-echo "  HAT stack  = $HAT_STACK, status LED = $LED, contact ch = $CONTACT_CH"
+echo "  HAT stack  = $HAT_STACK, GPS LED = $GPS_LED, logging LED = $LOGGING_LED, contact ch = $CONTACT_CH"
 
 sed \
   -e "s#__USER__#${RUN_USER}#g" \
@@ -50,7 +52,8 @@ sed \
   -e "s#__PORT__#${PORT}#g" \
   -e "s#__BAUD__#${BAUD}#g" \
   -e "s#__HAT_STACK__#${HAT_STACK}#g" \
-  -e "s#__LED__#${LED}#g" \
+  -e "s#__GPS_LED__#${GPS_LED}#g" \
+  -e "s#__LOGGING_LED__#${LOGGING_LED}#g" \
   -e "s#__CONTACT_CH__#${CONTACT_CH}#g" \
   "$TEMPLATE" > "$TARGET"
 
