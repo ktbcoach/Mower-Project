@@ -105,6 +105,10 @@ class GpxLogger:
         )
         return True
 
+    def flush(self) -> None:
+        if self._open:
+            self._fh.flush()
+
     def close(self) -> None:
         if self._open:
             self._fh.write("  </trkseg></trk>\n</gpx>\n")
