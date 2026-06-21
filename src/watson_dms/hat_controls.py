@@ -5,9 +5,10 @@ GPIO. Requires the ``multiio`` library (https://github.com/SequentMicrosystems/m
 and I2C enabled.
 
 The button is **momentary**, so each press toggles a logging latch (rather than
-holding a level like a switch). The HAT firmware debounces and latches presses:
-``get_button_latch()`` returns True if the button was pressed since the last
-read and clears itself — so we poll it once per loop and flip state on each True.
+holding a level like a switch). We read the live button state with
+``get_button()`` (bit 0) once per loop and toggle on the rising edge, with a
+software debounce. (We avoid ``get_button_latch()`` because some board firmware
+versions don't set the latch bit.)
 
 Exposes the same interface as :class:`watson_dms.switch.LoggingControls`
 (``logging_on`` property, ``update_indicator``, ``close``) so the collection
@@ -65,21 +66,30 @@ class HatLoggingControls:
         self._blink_on = False
         self._last_blink = 0.0
 
-        # Clear any press latched before we started, and start with LED off.
+        # Button edge detection (we don't rely on the firmware latch bit, which
+        # some board firmware versions don't set — see get_button vs latch).
+        self._debounce = 0.3
+        self._last_toggle = 0.0
+        self._last_pressed = self._read_button()
+
+        self._write_led(0)             # start with the LED off
+
+    def _read_button(self) -> bool:
+        """Live button state (bit 0); False on a transient I2C error."""
         try:
-            self._mio.get_button_latch()
+            return bool(self._mio.get_button())
         except OSError:
-            pass
-        self._write_led(0)
+            return self._last_pressed if hasattr(self, "_last_pressed") else False
 
     @property
     def logging_on(self) -> bool:
-        """Poll the button; each latched press toggles logging. Call once/loop."""
-        try:
-            if self._mio.get_button_latch():
-                self._logging = not self._logging
-        except OSError:
-            pass  # transient I2C hiccup — keep last known state
+        """Poll the button; a press (rising edge) toggles logging. Call once/loop."""
+        pressed = self._read_button()
+        now = time.monotonic()
+        if pressed and not self._last_pressed and (now - self._last_toggle) > self._debounce:
+            self._logging = not self._logging
+            self._last_toggle = now
+        self._last_pressed = pressed
         return self._logging
 
     def update_indicator(self, logging: bool, has_fix: bool) -> None:

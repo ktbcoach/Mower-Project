@@ -128,24 +128,49 @@ def cmd_hat_test(args: argparse.Namespace) -> int:
             mio.set_led(n, 0)
         except Exception as exc:
             print(f"  LED {n}: {exc}")
-    mio.get_button_latch()  # clear any stale press
+    try:
+        mio.get_button_latch()  # clear any stale latch
+    except OSError:
+        pass
 
-    print(f"\n# Press the HAT button — watching for {args.seconds:.0f}s (Ctrl-C to stop):")
-    presses = 0
+    print(f"\n# Press/hold the HAT button — watching {args.seconds:.0f}s (Ctrl-C to stop).")
+    print("#   live  = get_button()  (instantaneous state, bit 0)")
+    print("#   latch = get_button_latch()  (firmware latch, bit 1)")
+    edges = 0       # rising edges of the live state (what the logger uses)
+    latches = 0     # firmware latch events
+    last_live = None
     deadline = time.monotonic() + args.seconds
     try:
         while time.monotonic() < deadline:
             try:
-                if mio.get_button_latch():
-                    presses += 1
-                    print(f"  button press #{presses}")
-                    mio.set_led(1, 1); time.sleep(0.1); mio.set_led(1, 0)
-            except OSError:
-                pass
-            time.sleep(0.05)
+                live = bool(mio.get_button())
+                latched = bool(mio.get_button_latch())
+            except OSError as exc:
+                print(f"  I2C read error: {exc}")
+                time.sleep(0.2)
+                continue
+            if live != last_live:
+                if live:
+                    edges += 1
+                    print(f"  live: PRESSED   (rising edge #{edges})")
+                    mio.set_led(1, 1)
+                else:
+                    print("  live: released")
+                    mio.set_led(1, 0)
+                last_live = live
+            if latched:
+                latches += 1
+                print(f"  latch event #{latches}")
+            time.sleep(0.03)
     except KeyboardInterrupt:
         pass
-    print(f"# Done: {presses} press(es) detected.")
+    print(f"# Done: {edges} live press(es), {latches} firmware-latch event(s).")
+    if edges and not latches:
+        print("# -> Button works via get_button(); firmware latch unused. "
+              "The logger uses get_button(), so you're good.")
+    elif not edges and not latches:
+        print("# -> No button activity seen. Check the HAT stack address "
+              "(--hat-stack) and `i2cdetect -y 1`.")
     return 0
 
 
