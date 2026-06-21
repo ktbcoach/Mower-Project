@@ -128,13 +128,17 @@ only valid GPS fixes, ready to import into QGIS / Google Earth.
 ```python
 from watson_dms import parse_line
 
-r = parse_line("G 161409.9 -000.8 +00.1 273.4 +028.9 +44.86405 -091.46836 00894")
-print(r.heading_mode, r.heading_deg, r.latitude_deg, r.longitude_deg, r.has_gps_fix)
-# gps_true_north 273.4 44.86405 -91.46836 True
+# Current channel config (DEFAULT_CHANNELS): time, heading, X/Y/Z accel,
+# X/Y/Z rate, heading rate, velocity, lat, lon, status.
+r = parse_line("G 161409.9 273.4 +0.01 -0.02 -1.00 +01.5 -00.2 +00.3 +00.0 "
+               "+028.9 +44.86405 -091.46836 040")
+print(r.heading_mode, r.heading_deg, r.z_accel_g, r.latitude_deg, r.has_gps_fix)
+# gps_true_north 273.4 -1.0 44.86405 True
 ```
 
-If you reconfigure the unit's output channels (manual Appendix A), pass a
-matching `channels=` list to `parse_line`.
+The output channel set is configurable on the unit. `DEFAULT_CHANNELS` matches
+its current config; `FACTORY_CHANNELS` is the original layout. To parse a
+different configuration, pass a matching `channels=` list to `parse_line`.
 
 ## Tests
 

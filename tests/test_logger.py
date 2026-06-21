@@ -4,8 +4,14 @@ switch-gated collection loop."""
 from watson_dms.logger import CsvLogger, GpxLogger
 from watson_dms.parser import parse_line
 
-FIX = parse_line("G 161409.9 -000.8 +00.1 273.4 +028.9 +44.86405 -091.46836 00894")
-NOFIX = parse_line("I ******.* -000.8 +00.1 273.4 ****.* +**.***** +***.***** *****")
+FIX = parse_line(
+    "G 161409.9 273.4 +0.01 -0.02 -1.00 +01.5 -00.2 +00.3 +00.0 "
+    "+028.9 +44.86405 -091.46836 040"
+)
+NOFIX = parse_line(
+    "I ******.* 273.4 +0.01 -0.02 -1.00 +01.5 -00.2 +00.3 +00.0 "
+    "****.* +**.***** +***.***** 000"
+)
 
 
 def test_csv_logger_write_flush_close(tmp_path):

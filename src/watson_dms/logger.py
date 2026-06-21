@@ -9,20 +9,35 @@ from typing import Optional, TextIO
 
 from .parser import DmsReading
 
+# Superset of fields across channel configurations; columns not present in the
+# unit's current output stay blank. Keeping it fixed makes appended CSVs stable.
 CSV_FIELDS = [
     "host_time",       # ISO-8601 timestamp from the Pi when the line arrived
     "label",
     "heading_mode",
     "over_range",
     "utc",
-    "bank_deg",
-    "elevation_deg",
     "heading_deg",
     "velocity_kph",
     "latitude_deg",
     "longitude_deg",
     "altitude_ft",
     "altitude_m",
+    "bank_deg",
+    "elevation_deg",
+    "x_accel_g",
+    "y_accel_g",
+    "z_accel_g",
+    "forward_accel_g",
+    "lateral_accel_g",
+    "vertical_accel_g",
+    "x_rate_dps",
+    "y_rate_dps",
+    "z_rate_dps",
+    "heading_rate_dps",
+    "temperature_c",
+    "status",
+    "flags",
 ]
 
 
@@ -47,14 +62,27 @@ class CsvLogger:
                 "heading_mode": reading.heading_mode,
                 "over_range": int(reading.over_range),
                 "utc": reading.utc or "",
-                "bank_deg": _fmt(reading.bank_deg),
-                "elevation_deg": _fmt(reading.elevation_deg),
                 "heading_deg": _fmt(reading.heading_deg),
                 "velocity_kph": _fmt(reading.velocity_kph),
                 "latitude_deg": _fmt(reading.latitude_deg, 6),
                 "longitude_deg": _fmt(reading.longitude_deg, 6),
                 "altitude_ft": _fmt(reading.altitude_ft),
                 "altitude_m": _fmt(reading.altitude_m, 2),
+                "bank_deg": _fmt(reading.bank_deg),
+                "elevation_deg": _fmt(reading.elevation_deg),
+                "x_accel_g": _fmt(reading.x_accel_g),
+                "y_accel_g": _fmt(reading.y_accel_g),
+                "z_accel_g": _fmt(reading.z_accel_g),
+                "forward_accel_g": _fmt(reading.forward_accel_g),
+                "lateral_accel_g": _fmt(reading.lateral_accel_g),
+                "vertical_accel_g": _fmt(reading.vertical_accel_g),
+                "x_rate_dps": _fmt(reading.x_rate_dps),
+                "y_rate_dps": _fmt(reading.y_rate_dps),
+                "z_rate_dps": _fmt(reading.z_rate_dps),
+                "heading_rate_dps": _fmt(reading.heading_rate_dps),
+                "temperature_c": _fmt(reading.temperature_c, 1),
+                "status": "" if reading.status is None else reading.status,
+                "flags": "" if reading.flags is None else reading.flags,
             }
         )
 

@@ -1,12 +1,11 @@
 """Parser for the Watson DMS-SGP02 decimal ASCII serial output.
 
 The DMS-SGP02 streams space-delimited, carriage-return-terminated ASCII
-"strings" over RS-232. The factory-default string looks like::
+"strings" over RS-232. Each string starts with a status label letter, then the
+configured data fields. Example (factory-default channel set)::
 
     G 161409.9 -000.8 +00.1 273.4 +028.9 +44.86405 -091.46836 00894 <CR>
-    │   │        │      │     │     │      │          │           │
-    │   UTC      Bank   Elev  Head  Vel    Latitude   Longitude   Altitude(ft)
-    └─ status label
+    └─ label
 
 The leading label letter encodes the heading source and an over-range flag:
 
@@ -22,8 +21,9 @@ Invalid numeric fields are transmitted as asterisks, e.g. ``******.*`` for an
 invalid UTC or ``+**.*****`` for an invalid latitude. Those parse to ``None``.
 
 The set of channels in the string is user-configurable on the unit (manual
-Appendix A). ``DEFAULT_CHANNELS`` matches the documented factory-default
-string above. If you reconfigure the unit's output channels, pass a matching
+Appendix A, "Set Output Channels"). ``DEFAULT_CHANNELS`` is the set this unit is
+currently configured to emit. ``FACTORY_CHANNELS`` is the original factory
+layout, kept for reference. To parse a different configuration, pass a matching
 ``channels`` list to :func:`parse_line`.
 """
 
@@ -32,8 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Optional, Sequence
 
-# Channel order of the factory-default decimal string (manual p.7-8).
-DEFAULT_CHANNELS: tuple[str, ...] = (
+# Original factory-default string (manual p.7-8), kept for reference/tests.
+FACTORY_CHANNELS: tuple[str, ...] = (
     "time",
     "bank",
     "elevation",
@@ -42,6 +42,25 @@ DEFAULT_CHANNELS: tuple[str, ...] = (
     "latitude",
     "longitude",
     "altitude",
+)
+
+# Current unit configuration (set via the DMS "Set Output Channels" menu):
+# time, heading, X/Y/Z accel, X/Y/Z angular rate, heading rate, velocity,
+# latitude+longitude, status bits.
+DEFAULT_CHANNELS: tuple[str, ...] = (
+    "time",
+    "heading",
+    "x_accel",
+    "y_accel",
+    "z_accel",
+    "x_rate",
+    "y_rate",
+    "z_rate",
+    "heading_rate",
+    "velocity",
+    "latitude",
+    "longitude",
+    "status",
 )
 
 # Valid leading label characters (uppercase = nominal, lowercase = over-range).
@@ -55,6 +74,28 @@ _HEADING_MODE = {
 }
 
 _FT_PER_M = 3.280839895
+
+# Channel name -> DmsReading attribute, for fields parsed as a plain float.
+_FLOAT_FIELDS = {
+    "bank": "bank_deg",
+    "elevation": "elevation_deg",
+    "heading": "heading_deg",
+    "velocity": "velocity_kph",
+    "latitude": "latitude_deg",
+    "longitude": "longitude_deg",
+    "altitude": "altitude_ft",
+    "x_accel": "x_accel_g",
+    "y_accel": "y_accel_g",
+    "z_accel": "z_accel_g",
+    "forward_accel": "forward_accel_g",
+    "lateral_accel": "lateral_accel_g",
+    "vertical_accel": "vertical_accel_g",
+    "x_rate": "x_rate_dps",
+    "y_rate": "y_rate_dps",
+    "z_rate": "z_rate_dps",
+    "heading_rate": "heading_rate_dps",
+    "temperature": "temperature_c",
+}
 
 
 @dataclass
@@ -74,6 +115,24 @@ class DmsReading:
     latitude_deg: Optional[float] = None
     longitude_deg: Optional[float] = None
     altitude_ft: Optional[float] = None
+    # Accelerations (g)
+    x_accel_g: Optional[float] = None
+    y_accel_g: Optional[float] = None
+    z_accel_g: Optional[float] = None
+    forward_accel_g: Optional[float] = None
+    lateral_accel_g: Optional[float] = None
+    vertical_accel_g: Optional[float] = None
+    # Angular rates (deg/s)
+    x_rate_dps: Optional[float] = None
+    y_rate_dps: Optional[float] = None
+    z_rate_dps: Optional[float] = None
+    heading_rate_dps: Optional[float] = None
+    # Other
+    temperature_c: Optional[float] = None
+    status: Optional[int] = None          # status bits (parsed from octal)
+    status_raw: Optional[str] = None      # raw octal token, e.g. "040"
+    flags: Optional[int] = None           # flag bits (parsed from octal)
+    flags_raw: Optional[str] = None
 
     @property
     def altitude_m(self) -> Optional[float]:
@@ -85,6 +144,13 @@ class DmsReading:
     def has_gps_fix(self) -> bool:
         """True when both latitude and longitude are valid."""
         return self.latitude_deg is not None and self.longitude_deg is not None
+
+    @property
+    def ready(self) -> Optional[bool]:
+        """Status 'Ready' flag (bit 5), or None if status not in the stream."""
+        if self.status is None:
+            return None
+        return bool((self.status >> 5) & 1)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -105,11 +171,20 @@ def _to_float(token: str) -> Optional[float]:
     return float(token)
 
 
+def _parse_octal(token: str) -> tuple[Optional[str], Optional[int]]:
+    """Status/flag bits are 3 octal ASCII digits, e.g. '040'."""
+    if _is_invalid(token):
+        return None, None
+    try:
+        return token, int(token, 8)
+    except ValueError:
+        return token, None
+
+
 def _parse_utc(token: str) -> tuple[Optional[str], Optional[float]]:
     """Convert an ``HHMMSS.S`` token to ("HH:MM:SS.s", seconds-since-midnight)."""
     if _is_invalid(token):
         return None, None
-    # Format is six integer digits, a decimal point and one fractional digit.
     whole, _, frac = token.partition(".")
     whole = whole.zfill(6)
     hh = int(whole[0:2])
@@ -169,20 +244,12 @@ def parse_line(
     for name, token in zip(channels, tokens):
         if name == "time":
             reading.utc, reading.utc_seconds = _parse_utc(token)
-        elif name == "bank":
-            reading.bank_deg = _to_float(token)
-        elif name == "elevation":
-            reading.elevation_deg = _to_float(token)
-        elif name == "heading":
-            reading.heading_deg = _to_float(token)
-        elif name == "velocity":
-            reading.velocity_kph = _to_float(token)
-        elif name == "latitude":
-            reading.latitude_deg = _to_float(token)
-        elif name == "longitude":
-            reading.longitude_deg = _to_float(token)
-        elif name == "altitude":
-            reading.altitude_ft = _to_float(token)
+        elif name in _FLOAT_FIELDS:
+            setattr(reading, _FLOAT_FIELDS[name], _to_float(token))
+        elif name == "status":
+            reading.status_raw, reading.status = _parse_octal(token)
+        elif name == "flags":
+            reading.flags_raw, reading.flags = _parse_octal(token)
         else:
             raise ParseError(f"unknown channel name {name!r}")
 

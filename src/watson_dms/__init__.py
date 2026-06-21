@@ -2,6 +2,7 @@
 
 from .parser import (
     DEFAULT_CHANNELS,
+    FACTORY_CHANNELS,
     DmsReading,
     ParseError,
     is_data_line,
@@ -10,6 +11,7 @@ from .parser import (
 
 __all__ = [
     "DEFAULT_CHANNELS",
+    "FACTORY_CHANNELS",
     "DmsReading",
     "ParseError",
     "is_data_line",

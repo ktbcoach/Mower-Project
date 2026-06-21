@@ -65,26 +65,33 @@ configuration commands; logging works with just pins 2 and 5.
 | Frame rate | up to 71.11 frames/s (depends on baud + channel count) |
 | Startup | ~5 s data, up to 5 min for first satellite acquisition |
 
-## Default output string
+## Output string (current configuration)
+
+The output channels are user-configurable on the unit (Command mode → "Set
+Output Channels"). This unit is **currently configured** as `DEFAULT_CHANNELS`
+in `parser.py` — 13 fields after the label:
 
 ```
-G 161409.9 -000.8 +00.1 273.4 +028.9 +44.86405 -091.46836 00894 <CR>
+G 161409.9 273.4 +0.01 -0.02 -1.00 +01.5 -00.2 +00.3 +00.0 +028.9 +44.86405 -091.46836 040 <CR>
 ```
 
 | # | Field | Notes |
 |---|-------|-------|
 | — | Label | `G` GPS true-north · `T` track · `I` relative · `R` reference; **lowercase = over-range error** |
 | 1 | UTC `HHMMSS.S` | `******.*` when invalid |
-| 2 | Bank (roll) ±179.9° | |
-| 3 | Elevation (pitch) ±89.9° | |
-| 4 | Heading 0–359.9° | |
-| 5 | Velocity ±399.9 km/h | `****.*` when invalid |
-| 6 | Latitude ±89.99999° | `+**.*****` when invalid |
-| 7 | Longitude ±179.99999° | `+***.*****` when invalid |
-| 8 | Altitude (feet, 0–21500) | `*****` when invalid; MSL by default |
+| 2 | Heading 0–359.9° | |
+| 3–5 | X / Y / Z acceleration (g) | body frame |
+| 6–8 | X / Y / Z angular rate (°/s) | roll / pitch / yaw |
+| 9 | Heading rate (°/s) | |
+| 10 | Velocity ±399.9 km/h | `****.*` when invalid |
+| 11 | Latitude ±89.99999° | `+**.*****` when invalid |
+| 12 | Longitude ±179.99999° | `+***.*****` when invalid |
+| 13 | Status bits | 3 octal digits; bit 5 = Ready, bits 0–4/6 = error flags |
 
-GPS position accuracy: **±2.5 m** standalone, **±0.6 m** with DGPS. Heading
-accuracy depends on antenna spacing (0.5° at 0.5 m → 0.07° at 5 m).
+Factory-default layout (bank, elevation, …, altitude) is kept as
+`FACTORY_CHANNELS`. If you re-run "Set Output Channels", update `DEFAULT_CHANNELS`
+to match the new order. GPS position accuracy: **±2.5 m** standalone, **±0.6 m**
+with DGPS. Heading accuracy depends on antenna spacing (0.5° at 0.5 m → 0.07° at 5 m).
 
 ## Antenna mounting (affects heading accuracy)
 
