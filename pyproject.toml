@@ -17,7 +17,9 @@ dev = ["pytest>=7"]
 # On Raspberry Pi OS gpiozero/lgpio ship via apt, so a venv created with
 # --system-site-packages (see README) is the recommended path; this extra is
 # the fallback for a pip-only install.
-pi = ["multiio", "gpiozero>=2.0", "lgpio>=0.2"]
+# Note: the Sequent library is published to PyPI as "SMmultiio" but imports as
+# `multiio`.
+pi = ["SMmultiio", "gpiozero>=2.0", "lgpio>=0.2"]
 
 [project.scripts]
 watson-dms = "watson_dms.__main__:main"

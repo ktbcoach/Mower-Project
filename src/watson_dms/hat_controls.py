@@ -51,8 +51,9 @@ class HatLoggingControls:
             import multiio
         except ImportError as exc:  # pragma: no cover - Pi-only dependency
             raise ImportError(
-                "The 'multiio' library is required for the Multi-IO HAT button/LEDs.\n"
-                "Install it with:  pip install multiio   (and enable I2C)"
+                "The Sequent Multi-IO library is required for the HAT button/LEDs.\n"
+                "Install it with:  pip install SMmultiio   (imports as 'multiio'; "
+                "and enable I2C)"
             ) from exc
 
         self._mio = multiio.SMmultiio(stack, i2c)

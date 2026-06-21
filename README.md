@@ -42,13 +42,14 @@ sudo reboot
 #    be visible; the [pi] extra adds multiio for the HAT button/LEDs.
 cd gps-collector
 python3 -m venv --system-site-packages .venv && source .venv/bin/activate
-pip install -e ".[pi]"      # pyserial + multiio + gpiozero + `watson-dms` cmd
+pip install -e ".[pi]"      # pyserial + SMmultiio + gpiozero + `watson-dms` cmd
 ```
 
 Make sure your user is in the `dialout` (serial), `i2c` (HAT), and `gpio`
 groups: `sudo usermod -aG dialout,i2c,gpio $USER` (log out/in afterward).
 
-> If `multiio` isn't on PyPI for your setup, install Sequent's driver from
+> The Sequent HAT library is `SMmultiio` on PyPI (it imports as `multiio`).
+> If it won't install, get it from
 > [github.com/SequentMicrosystems/multiio-rpi](https://github.com/SequentMicrosystems/multiio-rpi)
 > (`python` subdir). Verify the HAT is seen with `i2cdetect -y 1`.
 

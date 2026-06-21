@@ -109,7 +109,7 @@ def cmd_hat_test(args: argparse.Namespace) -> int:
     try:
         import multiio
     except ImportError as exc:
-        print(f"# 'multiio' not installed: {exc}\n# Install with: pip install multiio",
+        print(f"# 'multiio' not installed: {exc}\n# Install with: pip install SMmultiio",
               file=sys.stderr)
         return 2
     try:
