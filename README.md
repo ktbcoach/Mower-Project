@@ -20,8 +20,9 @@ gps-collector/
 │   ├── serial_reader.py  # pyserial wrapper, CR-terminated line reader
 │   ├── capture.py        # raw dump + baud-rate auto-detect (run this first)
 │   ├── logger.py         # CSV and GPX writers
-│   ├── switch.py         # GPIO logging switch + status LED (gpiozero)
-│   ├── collect.py        # collection loops (continuous + switch-gated)
+│   ├── hat_controls.py   # Multi-IO HAT button + LEDs over I2C (default)
+│   ├── switch.py         # alt: switch + LED wired to Pi GPIO (gpiozero)
+│   ├── collect.py        # collection loops (continuous + button/switch-gated)
 │   └── __main__.py       # `python -m watson_dms` CLI
 ├── tests/test_parser.py     # parser tests vs. the manual's worked example
 ├── scripts/setup_pi.sh      # enable UART5 + I2C, free the serial console
@@ -37,15 +38,19 @@ gps-collector/
 sudo bash scripts/setup_pi.sh
 sudo reboot
 
-# 2. Install. Use --system-site-packages so the OS-provided gpiozero/lgpio
-#    (for the GPIO switch + LED) are visible inside the venv.
+# 2. Install. --system-site-packages lets OS-provided libs (gpiozero/lgpio)
+#    be visible; the [pi] extra adds multiio for the HAT button/LEDs.
 cd gps-collector
 python3 -m venv --system-site-packages .venv && source .venv/bin/activate
-pip install -e .            # pyserial + the `watson-dms` command
+pip install -e ".[pi]"      # pyserial + multiio + gpiozero + `watson-dms` cmd
 ```
 
-Make sure your user is in the `dialout` (serial) and `gpio` (GPIO) groups:
-`sudo usermod -aG dialout,gpio $USER` (log out/in afterward).
+Make sure your user is in the `dialout` (serial), `i2c` (HAT), and `gpio`
+groups: `sudo usermod -aG dialout,i2c,gpio $USER` (log out/in afterward).
+
+> If `multiio` isn't on PyPI for your setup, install Sequent's driver from
+> [github.com/SequentMicrosystems/multiio-rpi](https://github.com/SequentMicrosystems/multiio-rpi)
+> (`python` subdir). Verify the HAT is seen with `i2cdetect -y 1`.
 
 ## Usage
 
@@ -73,34 +78,38 @@ python -m watson_dms capture --seconds 10 > raw.txt
 python -m watson_dms parse raw.txt
 ```
 
-## Auto-start at boot with a physical switch
+## Auto-start at boot with the HAT button
 
-The intended field setup: the Pi boots straight into the logger, and a toggle
-switch on the mower starts/stops recording. See
-[`docs/HARDWARE.md`](docs/HARDWARE.md#logging-switch--status-led-gpio) for wiring
-(switch → GPIO16/GND, LED → GPIO26).
+The field setup: the Pi boots straight into the logger, and the **Multi-IO HAT's
+onboard push button** starts/stops recording — no extra wiring. A HAT LED shows
+status. See [`docs/HARDWARE.md`](docs/HARDWARE.md#logging-button--status-led).
 
 ```bash
+# First, map the HAT's LED numbers and confirm the button works:
+python -m watson_dms hat-test
+
 # Install + enable the service (auto-starts on every boot).
 sudo bash scripts/install_service.sh
-# Override pins/port if needed:
-#   sudo SWITCH_PIN=16 LED_PIN=26 PORT=/dev/ttyAMA5 BAUD=9600 \
+# Override if needed (LED = onboard LED number, stack = HAT address):
+#   sudo HAT_STACK=0 LED=1 PORT=/dev/ttyAMA5 BAUD=9600 \
 #        bash scripts/install_service.sh
 
 systemctl status watson-dms        # check it's running
 journalctl -u watson-dms -f        # watch session start/stop live
 ```
 
-Behavior: the service stays up and synced to the serial stream. Flip the switch
-**ON** and it opens a fresh `logs/dms-<timestamp>.csv` + `.gpx`; flip **OFF** and
-it flushes and closes them. The **LED** is off when idle, blinks while searching
-for a fix, and is solid once logging with a GPS fix. CSV is flushed every ~2 s so
-an abrupt power-off loses at most a couple of seconds.
+Behavior: the service stays up and synced to the serial stream. **Press the
+button** to start logging — it opens a fresh `logs/dms-<timestamp>.csv` + `.gpx`;
+**press again** to stop (flush + close). The status **LED** is off when idle,
+blinks while searching for a fix, and is solid once logging with a GPS fix. CSV
+is flushed every ~2 s so an abrupt power-off loses at most a couple of seconds.
 
-To try switch mode by hand (without the service):
+To try button mode by hand (without the service):
 
 ```bash
-python -m watson_dms collect --switch --switch-pin 16 --led-pin 26
+python -m watson_dms collect --switch              # --source hat is the default
+# or, to use a switch wired to Pi GPIO instead of the HAT:
+python -m watson_dms collect --switch --source gpio --switch-pin 16 --led-pin 26
 ```
 
 CSV columns include host timestamp, heading mode, over-range flag, UTC,
@@ -135,8 +144,8 @@ plus invalid-field (asterisk), over-range, and reconfigured-channel cases.
 - [x] Decimal ASCII parser (factory-default channel string) + tests
 - [x] Serial reader, raw capture, baud auto-detect
 - [x] CSV + GPX logging, live collection loop, CLI
-- [x] Switch-gated logging + status LED (GPIO)
+- [x] Button-gated logging + status LED (Multi-IO HAT button/LEDs; GPIO fallback)
 - [x] systemd service for auto-start at boot
 - [ ] Verify against the real unit on the Pi (run `detect` → `capture`)
-- [ ] Verify switch/LED + service on the Pi
+- [ ] Verify HAT button/LED (`hat-test`) + service on the Pi
 - [ ] Optional: live web/TUI dashboard, MQTT streaming, binary-format support

@@ -95,13 +95,16 @@ def collect_switched(
     session: Optional[_Session] = None
     last_flush = time.monotonic()
 
-    _log(f"service up on {port} @ {baud} 8N1; waiting for switch")
+    _log(f"service up on {port} @ {baud} 8N1; waiting for button/switch")
+    last_has_fix = False
     try:
-        with serial_reader.open_port(port, baud) as ser:
-            for line in serial_reader.read_lines(ser):
-                logging_on = controls.logging_on
+        # Short timeout + idle ticks so the button is polled (and the LED
+        # animates) even when the serial stream goes briefly quiet.
+        with serial_reader.open_port(port, baud, timeout=0.25) as ser:
+            for line in serial_reader.read_lines(ser, idle_tick=True):
+                logging_on = controls.logging_on  # poll once per iteration
 
-                # Handle switch transitions.
+                # Handle on/off transitions (a button press toggles logging_on).
                 if logging_on and session is None:
                     session = _Session(log_dir, gpx)
                     _log(f"logging STARTED -> {session.name}")
@@ -111,21 +114,21 @@ def collect_switched(
                     session.close()
                     session = None
 
-                reading = parse_line(line)
-                if reading is None:
-                    continue  # header / noise
+                reading = parse_line(line) if line is not None else None
+                if reading is not None:
+                    last_has_fix = reading.has_gps_fix
+                    if session is not None and not (fix_only and not reading.has_gps_fix):
+                        session.write(reading, _dt.datetime.now(_dt.timezone.utc))
 
-                controls.update_indicator(logging_on, reading.has_gps_fix)
-
-                if session is not None and not (fix_only and not reading.has_gps_fix):
-                    session.write(reading, _dt.datetime.now(_dt.timezone.utc))
+                # Reflect state on the LED every iteration (animates the blink).
+                controls.update_indicator(session is not None, last_has_fix)
 
                 now = time.monotonic()
                 if session is not None and now - last_flush >= _FLUSH_INTERVAL_S:
                     session.flush()
                     last_flush = now
 
-                if not quiet:
+                if not quiet and reading is not None:
                     state = "LOG" if session is not None else "idle"
                     sys.stdout.write(f"\r[{state}] {_status(reading)}")
                     sys.stdout.flush()

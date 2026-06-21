@@ -8,7 +8,7 @@
 #     sudo bash scripts/install_service.sh
 #
 # Override defaults with env vars, e.g.:
-#     sudo PORT=/dev/ttyAMA5 BAUD=9600 SWITCH_PIN=16 LED_PIN=26 \
+#     sudo PORT=/dev/ttyAMA5 BAUD=9600 HAT_STACK=0 LED=1 \
 #          bash scripts/install_service.sh
 set -euo pipefail
 
@@ -29,8 +29,8 @@ fi
 
 PORT="${PORT:-/dev/ttyAMA5}"
 BAUD="${BAUD:-9600}"
-SWITCH_PIN="${SWITCH_PIN:-16}"
-LED_PIN="${LED_PIN:-26}"
+HAT_STACK="${HAT_STACK:-0}"
+LED="${LED:-1}"
 
 TEMPLATE="$APPDIR/scripts/watson-dms.service"
 TARGET="/etc/systemd/system/watson-dms.service"
@@ -40,7 +40,7 @@ echo "  user       = $RUN_USER"
 echo "  app dir    = $APPDIR"
 echo "  python     = $PYTHON"
 echo "  port/baud  = $PORT @ $BAUD"
-echo "  switch/led = GPIO$SWITCH_PIN / GPIO$LED_PIN"
+echo "  HAT stack  = $HAT_STACK, status LED = $LED"
 
 sed \
   -e "s#__USER__#${RUN_USER}#g" \
@@ -48,8 +48,8 @@ sed \
   -e "s#__PYTHON__#${PYTHON}#g" \
   -e "s#__PORT__#${PORT}#g" \
   -e "s#__BAUD__#${BAUD}#g" \
-  -e "s#__SWITCH_PIN__#${SWITCH_PIN}#g" \
-  -e "s#__LED_PIN__#${LED_PIN}#g" \
+  -e "s#__HAT_STACK__#${HAT_STACK}#g" \
+  -e "s#__LED__#${LED}#g" \
   "$TEMPLATE" > "$TARGET"
 
 mkdir -p "$APPDIR/logs"

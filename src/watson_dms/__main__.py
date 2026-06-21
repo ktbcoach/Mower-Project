@@ -37,19 +37,31 @@ def cmd_detect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _make_controls(args: argparse.Namespace):
+    """Build the logging-control backend (HAT button/LEDs or Pi GPIO)."""
+    if args.source == "hat":
+        from .hat_controls import HatLoggingControls
+        return HatLoggingControls(stack=args.hat_stack, status_led=args.led)
+    from .switch import LoggingControls
+    led_pin = None if args.no_led else args.led_pin
+    return LoggingControls(
+        switch_pin=args.switch_pin,
+        led_pin=led_pin,
+        closed_is_on=not args.switch_invert,
+    )
+
+
 def cmd_collect(args: argparse.Namespace) -> int:
     if args.switch:
         try:
-            from .switch import LoggingControls
+            controls = _make_controls(args)
         except ImportError as exc:
             print(f"# {exc}", file=sys.stderr)
             return 2
-        led_pin = None if args.no_led else args.led_pin
-        controls = LoggingControls(
-            switch_pin=args.switch_pin,
-            led_pin=led_pin,
-            closed_is_on=not args.switch_invert,
-        )
+        except Exception as exc:  # e.g. I2C/HAT not ready — let systemd retry
+            print(f"# could not initialize {args.source} controls: {exc}\n"
+                  f"# (HAT seated? I2C enabled? try: i2cdetect -y 1)", file=sys.stderr)
+            return 1
         collect_switched(
             port=args.port,
             baud=args.baud,
@@ -91,6 +103,52 @@ def cmd_parse(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_hat_test(args: argparse.Namespace) -> int:
+    """Cycle the HAT's LEDs and report button presses (wiring/ID check)."""
+    import time
+    try:
+        import multiio
+    except ImportError as exc:
+        print(f"# 'multiio' not installed: {exc}\n# Install with: pip install multiio",
+              file=sys.stderr)
+        return 2
+    try:
+        mio = multiio.SMmultiio(args.hat_stack, 1)
+    except Exception as exc:
+        print(f"# Could not open Multi-IO HAT at stack {args.hat_stack}: {exc}\n"
+              f"# Is I2C enabled and the HAT seated? Check: i2cdetect -y 1", file=sys.stderr)
+        return 2
+
+    print(f"# Cycling LEDs 1..{args.leds} (watch the board to map numbers):")
+    for n in range(1, args.leds + 1):
+        try:
+            mio.set_led(n, 1)
+            print(f"  LED {n} ON")
+            time.sleep(0.6)
+            mio.set_led(n, 0)
+        except Exception as exc:
+            print(f"  LED {n}: {exc}")
+    mio.get_button_latch()  # clear any stale press
+
+    print(f"\n# Press the HAT button — watching for {args.seconds:.0f}s (Ctrl-C to stop):")
+    presses = 0
+    deadline = time.monotonic() + args.seconds
+    try:
+        while time.monotonic() < deadline:
+            try:
+                if mio.get_button_latch():
+                    presses += 1
+                    print(f"  button press #{presses}")
+                    mio.set_led(1, 1); time.sleep(0.1); mio.set_led(1, 0)
+            except OSError:
+                pass
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        pass
+    print(f"# Done: {presses} press(es) detected.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="watson_dms",
@@ -125,20 +183,40 @@ def build_parser() -> argparse.ArgumentParser:
     # Continuous mode (no switch):
     co.add_argument("--csv", help="CSV output path (default: <log-dir>/dms-<timestamp>.csv)")
     co.add_argument("--gpx", help="also write a GPX track of GPS fixes")
-    # Switch-gated service mode:
-    sw = co.add_argument_group("switch mode (physical on/off switch)")
+    # Switch/button-gated service mode:
+    sw = co.add_argument_group("switch mode (button/switch gates logging)")
     sw.add_argument("--switch", action="store_true",
-                    help="gate logging with a GPIO switch; one log set per ON period")
-    sw.add_argument("--switch-pin", type=int, default=16,
-                    help="BCM pin of the switch-to-ground (default: 16)")
-    sw.add_argument("--switch-invert", action="store_true",
-                    help="treat an OPEN switch as ON (default: closed = ON)")
-    sw.add_argument("--led-pin", type=int, default=26,
-                    help="BCM pin of the status LED (default: 26)")
-    sw.add_argument("--no-led", action="store_true", help="run without a status LED")
+                    help="gate logging with a button/switch; one log set per ON period")
+    sw.add_argument("--source", choices=("hat", "gpio"), default="hat",
+                    help="control source: 'hat' = Multi-IO HAT button+LEDs (default), "
+                         "'gpio' = switch+LED wired to Pi GPIO")
     sw.add_argument("--no-gpx", action="store_true",
                     help="write only CSV per session, not GPX")
+    # HAT source (--source hat):
+    sw.add_argument("--hat-stack", type=int, default=0,
+                    help="Multi-IO HAT stack address (default: 0)")
+    sw.add_argument("--led", type=int, default=1,
+                    help="HAT onboard LED number for status (default: 1)")
+    # GPIO source (--source gpio):
+    sw.add_argument("--switch-pin", type=int, default=16,
+                    help="[gpio] BCM pin of the switch-to-ground (default: 16)")
+    sw.add_argument("--switch-invert", action="store_true",
+                    help="[gpio] treat an OPEN switch as ON (default: closed = ON)")
+    sw.add_argument("--led-pin", type=int, default=26,
+                    help="[gpio] BCM pin of the status LED (default: 26)")
+    sw.add_argument("--no-led", action="store_true",
+                    help="[gpio] run without a status LED")
     co.set_defaults(func=cmd_collect)
+
+    ht = sub.add_parser("hat-test",
+                        help="identify Multi-IO HAT LED numbers and test the button")
+    ht.add_argument("--hat-stack", type=int, default=0,
+                    help="Multi-IO HAT stack address (default: 0)")
+    ht.add_argument("--leds", type=int, default=4,
+                    help="how many LEDs to cycle through (default: 4)")
+    ht.add_argument("--seconds", type=float, default=15.0,
+                    help="how long to watch for button presses (default: 15)")
+    ht.set_defaults(func=cmd_hat_test)
 
     pr = sub.add_parser("parse", help="parse a captured text file (offline)")
     pr.add_argument("file", help="file of raw frames, or - for stdin")

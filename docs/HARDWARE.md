@@ -95,37 +95,30 @@ accuracy depends on antenna spacing (0.5° at 0.5 m → 0.07° at 5 m).
   nearby higher than the ground plane.
 - Latitude/longitude are reported at the **aft** antenna.
 
-## Logging switch & status LED (GPIO)
+## Logging button & status LED
 
-The Multi-IO HAT uses only I2C (+ UART5 on GPIO12/13), so the rest of the GPIO
-header is free for a logging switch and an indicator LED. Defaults are
-configurable via the service installer / CLI flags.
+**Primary: the Multi-IO HAT's onboard button + LEDs — no extra wiring.**
+The HAT exposes its push button and LEDs over I2C via the `multiio` library.
 
-**Switch — toggle/SPST between GPIO16 (pin 36) and GND:**
-- No external voltage. The Pi's internal pull-up holds the pin high; closing the
-  switch pulls it to ground.
-- **Closed = logging ON**, open = idle. (Flip to invert with `--switch-invert`.)
-- Each ON→OFF cycle produces one timestamped file set in `logs/`.
+- **Button (momentary):** each press **toggles** logging on/off. The HAT
+  firmware debounces and latches presses (`get_button_latch()`), so a press is
+  never missed; the service opens a new log session on the press that turns
+  logging on and closes it on the next press.
+- **Status LED** (`--led` number, default 1): **off** = idle ·
+  **blinking** = logging but still searching for a fix · **solid** = logging
+  with a GPS fix. Blink is software-timed (the HAT has no hardware blink).
+- Needs I2C enabled (`setup_pi.sh` does this) and the `multiio` library.
+- The board's stack address (`--hat-stack`, default 0) is set by the HAT's
+  address jumpers; leave at 0 for a single board.
 
-```
-GPIO16 (pin 36) ──/ ──── GND (pin 34/39)
-                switch
-```
+Run `python -m watson_dms hat-test` to map the LED numbers (it lights each in
+turn) and confirm the button registers presses.
 
-**Status LED — GPIO26 (pin 37) → resistor → LED → GND:**
-- Use a ~330 Ω series resistor. Anode (long leg) toward the GPIO via the
-  resistor, cathode to GND.
-- **Off** = idle (not logging) · **solid** = logging with a GPS fix ·
-  **blinking** = logging but still searching for a fix.
-
-```
-GPIO26 (pin 37) ──[330Ω]──▶|── GND
-                            LED
-```
-
-Pick any free BCM pins if 16/26 are awkward to reach on your stack; pass
-`SWITCH_PIN=` / `LED_PIN=` to `install_service.sh` (or `--switch-pin` /
-`--led-pin` on the CLI). Avoid GPIO2/3 (I2C) and GPIO12/13/14/15 (UARTs).
+**Alternative: a switch + LED on Pi GPIO (`--source gpio`).**
+Because the HAT uses only I2C + UART5, the GPIO header is free if you'd rather
+wire your own. Toggle switch between **GPIO16 (pin 36)** and GND (closed = ON,
+internal pull-up); LED on **GPIO26 (pin 37)** through a ~330 Ω resistor to GND.
+Same off/blink/solid behavior. Avoid GPIO2/3 (I2C) and GPIO12/13/14/15 (UARTs).
 
 ## Command mode (changing baud, channels, heading mode)
 

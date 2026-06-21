@@ -7,7 +7,7 @@ each frame with a carriage return (``\\r``); pyserial's ``readline`` splits on
 
 from __future__ import annotations
 
-from typing import Iterator
+from typing import Iterator, Optional
 
 try:
     import serial  # pyserial
@@ -45,18 +45,26 @@ def open_port(
 def read_lines(
     ser: "serial.Serial",
     encoding: str = "ascii",
-) -> Iterator[str]:
+    idle_tick: bool = False,
+) -> "Iterator[Optional[str]]":
     """Yield CR-terminated lines decoded as text, indefinitely.
 
     Bytes that fail to decode are replaced rather than raising, so a noisy
     line never kills the stream. The caller is responsible for closing
     ``ser`` (e.g. via a ``with`` block).
+
+    If ``idle_tick`` is True, ``None`` is yielded whenever a read times out
+    with no completed line. This lets a caller poll other inputs (e.g. a
+    button) on a regular cadence even when the serial stream goes quiet. The
+    tick interval follows the port's ``timeout``.
     """
     buffer = bytearray()
     while True:
         chunk = ser.read(256)
         if not chunk:
-            continue  # read timeout, no data yet
+            if idle_tick:
+                yield None  # read timeout, no data yet
+            continue
         buffer.extend(chunk)
         # Frames are CR-terminated; tolerate stray LFs too.
         while True:

@@ -6,12 +6,14 @@ After=local-fs.target
 [Service]
 Type=simple
 User=__USER__
-SupplementaryGroups=dialout gpio
+# dialout = serial port, i2c = Multi-IO HAT, gpio = optional direct-GPIO source.
+SupplementaryGroups=dialout i2c gpio
 WorkingDirectory=__APPDIR__
-# Switch-gated collection: process stays up, the GPIO switch starts/stops logs.
-ExecStart=__PYTHON__ -m watson_dms collect --switch \
+# Button-gated collection: process stays up; the Multi-IO HAT button toggles
+# logging, an onboard LED shows status.
+ExecStart=__PYTHON__ -m watson_dms collect --switch --source hat \
   --port __PORT__ --baud __BAUD__ \
-  --switch-pin __SWITCH_PIN__ --led-pin __LED_PIN__ \
+  --hat-stack __HAT_STACK__ --led __LED__ \
   --log-dir __APPDIR__/logs --quiet
 Restart=always
 RestartSec=3
