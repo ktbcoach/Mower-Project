@@ -136,9 +136,11 @@ print(r.heading_mode, r.heading_deg, r.z_accel_g, r.latitude_deg, r.has_gps_fix)
 # gps_true_north 273.4 -1.0 44.86405 True
 ```
 
-The output channel set is configurable on the unit. `DEFAULT_CHANNELS` matches
-its current config; `FACTORY_CHANNELS` is the original layout. To parse a
-different configuration, pass a matching `channels=` list to `parse_line`.
+The output channel set is configurable on the unit. By default `parse_line`
+**auto-detects** the layout by field count — factory 8-field (`FACTORY_CHANNELS`)
+or the custom 13-field config (`DEFAULT_CHANNELS`) — which matters because the
+DMS reverts to factory output on power-up unless a custom config is saved to
+EEPROM. To force a specific layout, pass a `channels=` list to `parse_line`.
 
 ## Tests
 

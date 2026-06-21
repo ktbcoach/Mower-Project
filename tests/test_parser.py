@@ -82,6 +82,21 @@ def test_current_config_no_fix_indoors():
 
 # --- factory configuration (explicit channels) -------------------------------
 
+def test_auto_detects_factory_layout():
+    # An 8-field stream with no explicit channels auto-selects the factory layout.
+    r = parse_line(FACTORY_EXAMPLE)
+    assert r is not None
+    assert r.bank_deg == pytest.approx(-0.8)
+    assert r.elevation_deg == pytest.approx(0.1)
+    assert r.altitude_ft == pytest.approx(894)
+    assert r.x_accel_g is None          # accel fields absent in factory layout
+
+
+def test_unknown_field_count_is_none():
+    # A field count matching no known layout doesn't parse.
+    assert parse_line("G 1.0 2.0 3.0 4.0 5.0") is None   # 5 fields
+
+
 def test_factory_example():
     r = parse_line(FACTORY_EXAMPLE, channels=FACTORY_CHANNELS)
     assert r is not None

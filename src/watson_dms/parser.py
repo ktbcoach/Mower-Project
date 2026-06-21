@@ -63,6 +63,19 @@ DEFAULT_CHANNELS: tuple[str, ...] = (
     "status",
 )
 
+# Known layouts keyed by field count, used to auto-detect which configuration
+# the unit is emitting. The DMS reverts to its EEPROM default on power-up, so a
+# custom channel set only sticks if saved (send a '"' in command mode) — until
+# then it falls back to the factory 8-field string. The two known layouts have
+# distinct field counts (8 vs 13), so the count is unambiguous.
+_KNOWN_LAYOUTS = {
+    len(FACTORY_CHANNELS): FACTORY_CHANNELS,
+    len(DEFAULT_CHANNELS): DEFAULT_CHANNELS,
+}
+
+# Sentinel: let parse_line pick the layout from the field count.
+AUTO = "auto"
+
 # Valid leading label characters (uppercase = nominal, lowercase = over-range).
 _LABELS = "GTIRgtir"
 
@@ -204,10 +217,14 @@ def is_data_line(line: str) -> bool:
 
 def parse_line(
     line: str,
-    channels: Sequence[str] = DEFAULT_CHANNELS,
+    channels: "Sequence[str] | str" = AUTO,
     strict: bool = False,
 ) -> Optional[DmsReading]:
     """Parse one DMS-SGP02 decimal ASCII line into a :class:`DmsReading`.
+
+    With ``channels=AUTO`` (the default), the field layout is auto-detected from
+    the field count (factory 8-field or the custom 13-field config). Pass an
+    explicit channel list to force a specific layout.
 
     Returns ``None`` for blank lines and non-data lines (e.g. the power-on
     identification header), unless ``strict`` is set, in which case a
@@ -227,7 +244,17 @@ def parse_line(
         return None  # header / init message / noise
 
     tokens = stripped[1:].split()
-    if len(tokens) != len(channels):
+
+    if channels == AUTO:
+        layout = _KNOWN_LAYOUTS.get(len(tokens))
+        if layout is None:
+            if strict:
+                raise ParseError(
+                    f"no known layout for {len(tokens)} fields: {stripped!r}"
+                )
+            return None
+        channels = layout
+    elif len(tokens) != len(channels):
         if strict:
             raise ParseError(
                 f"expected {len(channels)} fields, got {len(tokens)}: {stripped!r}"
