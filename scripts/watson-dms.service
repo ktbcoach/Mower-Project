@@ -1,0 +1,23 @@
+[Unit]
+Description=Watson DMS-SGP02 GPS/inertial logger (switch-gated)
+# Wait for the filesystem; the unit + GPIO are local, no network needed.
+After=local-fs.target
+
+[Service]
+Type=simple
+User=__USER__
+SupplementaryGroups=dialout gpio
+WorkingDirectory=__APPDIR__
+# Switch-gated collection: process stays up, the GPIO switch starts/stops logs.
+ExecStart=__PYTHON__ -m watson_dms collect --switch \
+  --port __PORT__ --baud __BAUD__ \
+  --switch-pin __SWITCH_PIN__ --led-pin __LED_PIN__ \
+  --log-dir __APPDIR__/logs --quiet
+Restart=always
+RestartSec=3
+# Log to the journal: view with `journalctl -u watson-dms -f`.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

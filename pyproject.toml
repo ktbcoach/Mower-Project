@@ -11,6 +11,10 @@ dependencies = ["pyserial>=3.5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+# GPIO switch/LED support. On Raspberry Pi OS these ship via apt, so the
+# recommended path is a venv created with --system-site-packages (see README).
+# This extra is the fallback for a pip-only install.
+pi = ["gpiozero>=2.0", "lgpio>=0.2"]
 
 [project.scripts]
 watson-dms = "watson_dms.__main__:main"

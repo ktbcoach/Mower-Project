@@ -95,6 +95,38 @@ accuracy depends on antenna spacing (0.5° at 0.5 m → 0.07° at 5 m).
   nearby higher than the ground plane.
 - Latitude/longitude are reported at the **aft** antenna.
 
+## Logging switch & status LED (GPIO)
+
+The Multi-IO HAT uses only I2C (+ UART5 on GPIO12/13), so the rest of the GPIO
+header is free for a logging switch and an indicator LED. Defaults are
+configurable via the service installer / CLI flags.
+
+**Switch — toggle/SPST between GPIO16 (pin 36) and GND:**
+- No external voltage. The Pi's internal pull-up holds the pin high; closing the
+  switch pulls it to ground.
+- **Closed = logging ON**, open = idle. (Flip to invert with `--switch-invert`.)
+- Each ON→OFF cycle produces one timestamped file set in `logs/`.
+
+```
+GPIO16 (pin 36) ──/ ──── GND (pin 34/39)
+                switch
+```
+
+**Status LED — GPIO26 (pin 37) → resistor → LED → GND:**
+- Use a ~330 Ω series resistor. Anode (long leg) toward the GPIO via the
+  resistor, cathode to GND.
+- **Off** = idle (not logging) · **solid** = logging with a GPS fix ·
+  **blinking** = logging but still searching for a fix.
+
+```
+GPIO26 (pin 37) ──[330Ω]──▶|── GND
+                            LED
+```
+
+Pick any free BCM pins if 16/26 are awkward to reach on your stack; pass
+`SWITCH_PIN=` / `LED_PIN=` to `install_service.sh` (or `--switch-pin` /
+`--led-pin` on the CLI). Avoid GPIO2/3 (I2C) and GPIO12/13/14/15 (UARTs).
+
 ## Command mode (changing baud, channels, heading mode)
 
 Most settings live in EEPROM and are changed over the same serial link in
