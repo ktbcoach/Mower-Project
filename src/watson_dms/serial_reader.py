@@ -60,11 +60,18 @@ def read_lines(
     """
     buffer = bytearray()
     while True:
-        chunk = ser.read(256)
+        # Prompt read: block for the first byte (up to the port timeout), then
+        # drain whatever else has already landed. This returns within ~1 ms of
+        # data arriving instead of waiting for a fixed 256-byte block, so each
+        # frame is yielded as it completes rather than in quantized bursts.
+        chunk = ser.read(1)
         if not chunk:
             if idle_tick:
                 yield None  # read timeout, no data yet
             continue
+        waiting = ser.in_waiting
+        if waiting:
+            chunk += ser.read(waiting)
         buffer.extend(chunk)
         # Frames are CR-terminated; tolerate stray LFs too.
         while True:
