@@ -168,19 +168,18 @@ def parse(sentence: str) -> Optional[dict]:
         return {"type": "THS", "heading_deg": heading}
 
     if typ == "PQTMTAR" and len(f) >= 12:
-        # $PQTMTAR,MsgVer,UTC,Quality,Reserved,Baseline,Heading,Pitch,Roll,
-        #         AccHeading,AccPitch,AccRoll,Sats*CS
-        # Heading comes from THS (standard, unambiguous); from PQTMTAR we take
-        # quality + baseline (positions confident). Pitch/Roll indices (6/7) are
-        # provisional — confirm once the dual-antenna solution is live (all
-        # angle fields are empty until the baseline resolves).
+        # $PQTMTAR,MsgVer,UTC,Quality,Res,Length,Pitch,Roll,Heading,
+        #         AccPitch,AccRoll,AccHeading,UsedSV*CS   (Quectel spec / confirmed
+        # against a solved capture). Quality: 4 = RTK fixed, 5 = RTK float.
+        # A 2-antenna system leaves Roll empty (heading + pitch only).
         return {
             "type": "PQTMTAR",
             "heading_quality": _i(f[2]),
             "baseline_m": _f(f[4]),
-            "pitch_deg": _f(f[6]),
-            "roll_deg": _f(f[7]),
-            "heading_accuracy_deg": _f(f[8]),
+            "pitch_deg": _f(f[5]),
+            "roll_deg": _f(f[6]),
+            "heading_deg": _f(f[7]),
+            "heading_accuracy_deg": _f(f[10]),
         }
 
     return None

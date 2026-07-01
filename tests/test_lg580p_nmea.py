@@ -12,9 +12,14 @@ from lg580p.reading import GnssReading
 GGA = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
 RMC = "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A"
 VTG = "$GPVTG,054.7,T,034.4,M,005.5,N,010.2,K*48"
-# Real LG580P captures (heading unsolved: baseline 0, angles empty, THS void).
+# Real LG580P captures.
 THS_VOID = "$GNTHS,,V*10"
+# Heading unsolved: baseline 0, angles empty.
 PQTMTAR = "$PQTMTAR,1,010957.400,2,,0.000,,,,,,,14*67"
+# Heading solved (RTK float, quality 5): pitch/heading present, roll empty.
+PQTMTAR_SOLVED = (
+    "$PQTMTAR,1,014306.900,5,,3.127,-59.847549,,311.980952,24.363577,,39.765675,15*70"
+)
 
 
 # --- checksum / helpers ------------------------------------------------------
@@ -95,14 +100,35 @@ def test_parse_ths_valid_heading():
     assert d["heading_deg"] == pytest.approx(205.01)
 
 
-def test_parse_pqtmtar_real_capture():
+def test_parse_pqtmtar_unsolved():
     d = parse(PQTMTAR)               # relies on the *67 checksum being valid
     assert d is not None
     assert d["type"] == "PQTMTAR"
     assert d["heading_quality"] == 2
     assert d["baseline_m"] == pytest.approx(0.0)
-    assert d["pitch_deg"] is None    # unsolved -> empty fields
+    assert d["pitch_deg"] is None    # unsolved -> empty angle fields
     assert d["roll_deg"] is None
+    assert d["heading_deg"] is None
+
+
+def test_parse_pqtmtar_solved():
+    d = parse(PQTMTAR_SOLVED)        # relies on the *70 checksum being valid
+    assert d is not None
+    assert d["heading_quality"] == 5             # RTK float
+    assert d["baseline_m"] == pytest.approx(3.127)
+    assert d["pitch_deg"] == pytest.approx(-59.847549)
+    assert d["roll_deg"] is None                 # 2-antenna: no roll
+    assert d["heading_deg"] == pytest.approx(311.980952)
+    assert d["heading_accuracy_deg"] == pytest.approx(39.765675)
+
+
+def test_assembler_heading_from_pqtmtar():
+    asm = GnssAssembler()
+    asm.push(PQTMTAR_SOLVED)         # heading in via PQTMTAR (THS is void)
+    r = asm.push(GGA)
+    assert r.heading_deg == pytest.approx(311.980952)
+    assert r.pitch_deg == pytest.approx(-59.847549)
+    assert r.heading_quality == 5
 
 
 def test_assembler_merges_heading_from_ths():
