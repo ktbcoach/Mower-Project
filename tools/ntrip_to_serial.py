@@ -12,12 +12,15 @@ enable that. Single-base mountpoints don't need it.
 
 Standalone: only needs pyserial + the standard library.
 
-Example:
-    python3 ntrip_to_serial.py \
-        --host rtn.vtrans.vermont.gov --port 2101 --mountpoint VRS_RTCM3 \
-        --user USER --password PASS \
-        --serial /dev/ttyUSB0 --serial-baud 57600 \
-        --lat 44.42 --lon -72.98 --alt 200
+Examples:
+    # 1. Validate the caster/mountpoint (no radio needed — MONITOR mode):
+    python3 ntrip_to_serial.py --host 20.185.11.35 --port 2101 \
+        --mountpoint VTRI_VTRI_RTCM3 --user USER --password PASS
+
+    # 2. Bridge corrections to the base radio:
+    python3 ntrip_to_serial.py --host 20.185.11.35 --port 2101 \
+        --mountpoint VTRI_VTRI_RTCM3 --user USER --password PASS \
+        --serial /dev/ttyUSB0 --serial-baud 57600
 """
 
 from __future__ import annotations
@@ -59,6 +62,40 @@ def build_gga(lat: float, lon: float, alt: float) -> bytes:
     return f"${body}*{nmea_checksum(body)}\r\n".encode("ascii")
 
 
+class RtcmScanner:
+    """Tally RTCM3 message types in a byte stream (validation aid; no CRC check)."""
+
+    def __init__(self):
+        self.buf = bytearray()
+        self.counts: dict[int, int] = {}
+
+    def feed(self, data: bytes) -> None:
+        self.buf.extend(data)
+        while True:
+            i = self.buf.find(0xD3)
+            if i == -1:
+                self.buf.clear()
+                return
+            if i > 0:
+                del self.buf[:i]
+            if len(self.buf) < 3:
+                return
+            length = ((self.buf[1] & 0x03) << 8) | self.buf[2]
+            frame_len = 3 + length + 3  # 0xD3 + len header, payload, 3-byte CRC
+            if len(self.buf) < frame_len:
+                return
+            if length >= 2:
+                p = self.buf[3:5]
+                msg = (p[0] << 4) | (p[1] >> 4)
+                self.counts[msg] = self.counts.get(msg, 0) + 1
+            del self.buf[:frame_len]
+
+    def summary(self) -> str:
+        if not self.counts:
+            return "(no complete RTCM3 frames yet)"
+        return "  ".join(f"{m}:{n}" for m, n in sorted(self.counts.items()))
+
+
 def connect(args) -> socket.socket:
     sock = socket.create_connection((args.host, args.port), timeout=10)
     auth = base64.b64encode(f"{args.user}:{args.password}".encode()).decode()
@@ -86,32 +123,41 @@ def connect(args) -> socket.socket:
 
 
 def run(args) -> int:
-    ser = serial.Serial(args.serial, args.serial_baud, timeout=1)
-    print(f"# forwarding RTCM -> {args.serial} @ {args.serial_baud}")
+    ser = None
+    if args.serial:
+        ser = serial.Serial(args.serial, args.serial_baud, timeout=1)
+        print(f"# forwarding RTCM -> {args.serial} @ {args.serial_baud}")
+    else:
+        print("# MONITOR mode (no --serial): validating the stream only")
     gga = None
     if args.lat is not None and args.lon is not None:
         gga = build_gga(args.lat, args.lon, args.alt)
-        print(f"# will send GGA every {args.gga_interval}s (VRS position)")
+        print(f"# sending GGA every {args.gga_interval}s (position for VRS mountpoints)")
 
+    scanner = RtcmScanner()
     total = 0
     while True:
         try:
             sock = connect(args)
             if gga:
-                sock.sendall(gga)          # initial position so VRS starts
-            last_gga = time.monotonic()
+                sock.sendall(gga)
+            last_gga = last_report = time.monotonic()
             sock.settimeout(30)
             while True:
                 data = sock.recv(1024)
                 if not data:
                     raise ConnectionError("stream ended")
-                ser.write(data)
+                if ser:
+                    ser.write(data)
+                scanner.feed(data)
                 total += len(data)
-                sys.stdout.write(f"\r# {total} bytes forwarded")
-                sys.stdout.flush()
-                if gga and time.monotonic() - last_gga >= args.gga_interval:
+                now = time.monotonic()
+                if now - last_report >= 3:
+                    print(f"# {total} bytes; RTCM msgs {scanner.summary()}")
+                    last_report = now
+                if gga and now - last_gga >= args.gga_interval:
                     sock.sendall(gga)
-                    last_gga = time.monotonic()
+                    last_gga = now
         except KeyboardInterrupt:
             print("\n# stopped")
             return 0
@@ -127,7 +173,7 @@ def main() -> int:
     p.add_argument("--mountpoint", required=True)
     p.add_argument("--user", default="")
     p.add_argument("--password", default="")
-    p.add_argument("--serial", required=True, help="base radio serial port")
+    p.add_argument("--serial", help="base radio serial port; omit to MONITOR/validate only")
     p.add_argument("--serial-baud", type=int, default=57600)
     p.add_argument("--lat", type=float, help="fixed GGA latitude (VRS mountpoints)")
     p.add_argument("--lon", type=float, help="fixed GGA longitude")
