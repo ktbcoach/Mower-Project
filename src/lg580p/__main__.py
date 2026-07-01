@@ -43,6 +43,46 @@ def cmd_detect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _default_stamp() -> str:
+    import datetime as _dt
+    return _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def cmd_collect(args: argparse.Namespace) -> int:
+    from .collect import collect, collect_switched
+    if args.switch:
+        try:
+            from .controls import HatLoggingControls
+            controls = HatLoggingControls(
+                stack=args.hat_stack,
+                gps_led=args.gps_led,
+                logging_led=args.logging_led,
+                contact_channel=args.contact_channel,
+                contact_invert=args.contact_invert,
+            )
+        except ImportError as exc:
+            print(f"# {exc}", file=sys.stderr)
+            return 2
+        except Exception as exc:
+            print(f"# could not initialize HAT controls: {exc}\n"
+                  f"# (HAT seated? I2C enabled? try: i2cdetect -y 1)", file=sys.stderr)
+            return 1
+        collect_switched(
+            port=args.port, baud=args.baud, controls=controls,
+            log_dir=args.log_dir, fix_only=args.fix_only,
+            gpx=not args.no_gpx, quiet=args.quiet,
+        )
+        return 0
+
+    csv_path = args.csv
+    gpx_path = args.gpx
+    if csv_path is None and gpx_path is None:
+        csv_path = f"{args.log_dir}/lg580p-{_default_stamp()}.csv"
+    collect(port=args.port, baud=args.baud, csv_path=csv_path, gpx_path=gpx_path,
+            quiet=args.quiet, fix_only=args.fix_only)
+    return 0
+
+
 def cmd_parse(args: argparse.Namespace) -> int:
     """Parse a captured NMEA text file into assembled GnssReadings."""
     from .assembler import GnssAssembler
@@ -81,6 +121,30 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--seconds", type=float, default=3.0,
                    help="seconds to listen at each baud rate")
     d.set_defaults(func=cmd_detect)
+
+    co = sub.add_parser("collect", parents=[common], help="parse and log to CSV/GPX")
+    co.add_argument("--baud", type=int, default=serial_io.DEFAULT_BAUD)
+    co.add_argument("--log-dir", default="logs",
+                    help="directory for log files (default: logs)")
+    co.add_argument("--fix-only", action="store_true",
+                    help="only log epochs that have a GPS fix")
+    co.add_argument("--quiet", action="store_true", help="suppress the live status line")
+    co.add_argument("--csv", help="CSV output path (default: <log-dir>/lg580p-<ts>.csv)")
+    co.add_argument("--gpx", help="also write a GPX track of fixes")
+    sw = co.add_argument_group("switch mode (Multi-IO HAT dry-contact + LEDs)")
+    sw.add_argument("--switch", action="store_true",
+                    help="gate logging with the HAT dry-contact switch")
+    sw.add_argument("--no-gpx", action="store_true", help="write only CSV per session")
+    sw.add_argument("--hat-stack", type=int, default=0, help="HAT stack address (default: 0)")
+    sw.add_argument("--gps-led", type=int, default=1,
+                    help="HAT LED for GPS status: off=no fix, blink=fix, solid=RTK fixed (default: 1)")
+    sw.add_argument("--logging-led", type=int, default=2,
+                    help="HAT LED for logging status: off=idle, blink=logging (default: 2)")
+    sw.add_argument("--contact-channel", type=int, default=1,
+                    help="dry-contact/opto input channel (default: 1)")
+    sw.add_argument("--contact-invert", action="store_true",
+                    help="invert: OPEN contact = logging ON")
+    co.set_defaults(func=cmd_collect)
 
     pr = sub.add_parser("parse", help="assemble readings from a captured file")
     pr.add_argument("file", help="file of NMEA sentences, or - for stdin")

@@ -161,4 +161,26 @@ def parse(sentence: str) -> Optional[dict]:
             "speed_kph": _f(f[6]),    # km/h
         }
 
+    if typ == "THS" and len(f) >= 2:
+        # $--THS,heading,status  (status: A/E/D valid, V = not valid)
+        status = f[1].strip().upper()
+        heading = _f(f[0]) if status not in ("", "V") else None
+        return {"type": "THS", "heading_deg": heading}
+
+    if typ == "PQTMTAR" and len(f) >= 12:
+        # $PQTMTAR,MsgVer,UTC,Quality,Reserved,Baseline,Heading,Pitch,Roll,
+        #         AccHeading,AccPitch,AccRoll,Sats*CS
+        # Heading comes from THS (standard, unambiguous); from PQTMTAR we take
+        # quality + baseline (positions confident). Pitch/Roll indices (6/7) are
+        # provisional — confirm once the dual-antenna solution is live (all
+        # angle fields are empty until the baseline resolves).
+        return {
+            "type": "PQTMTAR",
+            "heading_quality": _i(f[2]),
+            "baseline_m": _f(f[4]),
+            "pitch_deg": _f(f[6]),
+            "roll_deg": _f(f[7]),
+            "heading_accuracy_deg": _f(f[8]),
+        }
+
     return None

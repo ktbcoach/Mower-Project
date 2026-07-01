@@ -12,6 +12,9 @@ from lg580p.reading import GnssReading
 GGA = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47"
 RMC = "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A"
 VTG = "$GPVTG,054.7,T,034.4,M,005.5,N,010.2,K*48"
+# Real LG580P captures (heading unsolved: baseline 0, angles empty, THS void).
+THS_VOID = "$GNTHS,,V*10"
+PQTMTAR = "$PQTMTAR,1,010957.400,2,,0.000,,,,,,,14*67"
 
 
 # --- checksum / helpers ------------------------------------------------------
@@ -75,6 +78,42 @@ def test_parse_vtg():
 
 def test_parse_rejects_bad_checksum():
     assert parse(GGA.replace("545.4", "999.9")) is None
+
+
+def test_parse_ths_void_is_no_heading():
+    d = parse(THS_VOID)
+    assert d["type"] == "THS"
+    assert d["heading_deg"] is None
+
+
+def test_parse_ths_valid_heading():
+    base = "$GNTHS,205.01,A"
+    cs = 0
+    for ch in base[1:]:
+        cs ^= ord(ch)
+    d = parse(f"{base}*{cs:02X}")
+    assert d["heading_deg"] == pytest.approx(205.01)
+
+
+def test_parse_pqtmtar_real_capture():
+    d = parse(PQTMTAR)               # relies on the *67 checksum being valid
+    assert d is not None
+    assert d["type"] == "PQTMTAR"
+    assert d["heading_quality"] == 2
+    assert d["baseline_m"] == pytest.approx(0.0)
+    assert d["pitch_deg"] is None    # unsolved -> empty fields
+    assert d["roll_deg"] is None
+
+
+def test_assembler_merges_heading_from_ths():
+    base = "$GNTHS,123.4,A"
+    cs = 0
+    for ch in base[1:]:
+        cs ^= ord(ch)
+    asm = GnssAssembler()
+    asm.push(f"{base}*{cs:02X}")     # heading in
+    r = asm.push(GGA)                # GGA completes the epoch
+    assert r.heading_deg == pytest.approx(123.4)
 
 
 # --- assembler ---------------------------------------------------------------

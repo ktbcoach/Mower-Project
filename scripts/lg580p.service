@@ -1,0 +1,23 @@
+[Unit]
+Description=SparkFun LG580P RTK GNSS logger (switch-gated)
+After=local-fs.target
+
+[Service]
+Type=simple
+User=__USER__
+# dialout = serial port, i2c = Multi-IO HAT (switch/LEDs).
+SupplementaryGroups=dialout i2c
+WorkingDirectory=__APPDIR__
+ExecStart=__PYTHON__ -m lg580p collect --switch \
+  --port __PORT__ --baud __BAUD__ \
+  --hat-stack __HAT_STACK__ \
+  --gps-led __GPS_LED__ --logging-led __LOGGING_LED__ \
+  --contact-channel __CONTACT_CH__ \
+  --log-dir __APPDIR__/logs --quiet
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

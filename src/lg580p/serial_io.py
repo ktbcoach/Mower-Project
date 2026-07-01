@@ -17,7 +17,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without pyserial
     ) from exc
 
 DEFAULT_PORT = "/dev/serial0"          # Pi primary UART (GPIO14/15)
-DEFAULT_BAUD = 460800                  # common LG580P default; confirm with `detect`
+DEFAULT_BAUD = 460800                  # confirmed default on this LG580P
 SUPPORTED_BAUDS = (9600, 115200, 230400, 460800, 921600)
 
 

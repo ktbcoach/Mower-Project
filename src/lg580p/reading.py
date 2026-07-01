@@ -48,7 +48,8 @@ class GnssReading:
     speed_kph: Optional[float] = None     # over ground
     course_deg: Optional[float] = None    # course over ground (track)
     # Dual-antenna heading (PQTMTAR) — populated once that parser is finalized.
-    heading_deg: Optional[float] = None
+    heading_deg: Optional[float] = None      # true heading (THS / dual-antenna)
+    heading_quality: Optional[int] = None    # PQTMTAR heading quality indicator
     pitch_deg: Optional[float] = None
     roll_deg: Optional[float] = None
     heading_accuracy_deg: Optional[float] = None
