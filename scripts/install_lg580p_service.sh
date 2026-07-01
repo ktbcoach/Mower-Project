@@ -5,6 +5,7 @@
 # Override with env vars, e.g.:
 #     sudo PORT=/dev/serial0 BAUD=460800 HAT_STACK=0 \
 #          GPS_LED=1 LOGGING_LED=2 CONTACT_CH=1 \
+#          RTCM_SOURCE=/dev/ttyUSB0 RTCM_BAUD=57600 \
 #          bash scripts/install_lg580p_service.sh
 set -euo pipefail
 
@@ -27,6 +28,14 @@ HAT_STACK="${HAT_STACK:-0}"
 GPS_LED="${GPS_LED:-1}"
 LOGGING_LED="${LOGGING_LED:-2}"
 CONTACT_CH="${CONTACT_CH:-1}"
+# RTCM correction radio (optional). Set RTCM_SOURCE=/dev/ttyUSB0 to enable.
+RTCM_SOURCE="${RTCM_SOURCE:-}"
+RTCM_BAUD="${RTCM_BAUD:-57600}"
+if [[ -n "$RTCM_SOURCE" ]]; then
+  RTCM_ARGS="--rtcm-source ${RTCM_SOURCE} --rtcm-baud ${RTCM_BAUD}"
+else
+  RTCM_ARGS=""
+fi
 
 TEMPLATE="$APPDIR/scripts/lg580p.service"
 TARGET="/etc/systemd/system/lg580p.service"
@@ -46,6 +55,7 @@ sed \
   -e "s#__GPS_LED__#${GPS_LED}#g" \
   -e "s#__LOGGING_LED__#${LOGGING_LED}#g" \
   -e "s#__CONTACT_CH__#${CONTACT_CH}#g" \
+  -e "s#__RTCM_ARGS__#${RTCM_ARGS}#g" \
   "$TEMPLATE" > "$TARGET"
 
 mkdir -p "$APPDIR/logs"

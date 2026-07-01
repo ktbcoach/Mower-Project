@@ -19,6 +19,12 @@ def _log(msg: str) -> None:
     print(f"# {msg}", file=sys.stderr, flush=True)
 
 
+def _corr_tag(injector) -> str:
+    if injector is None:
+        return ""
+    return "CORR " if injector.flowing else "  .  "
+
+
 def _status(r) -> str:
     q = r.fix_quality_name or "----"
     lat = f"{r.latitude_deg:.7f}" if r.latitude_deg is not None else "   --.-------"
@@ -56,6 +62,16 @@ class _Session:
             self.gpx.close()
 
 
+def _make_injector(ser, rtcm_source, rtcm_baud):
+    if not rtcm_source:
+        return None
+    from .rtcm import RtcmInjector
+    inj = RtcmInjector(ser, rtcm_source, rtcm_baud)
+    inj.start()
+    _log(f"RTCM injection from {rtcm_source} @ {rtcm_baud}")
+    return inj
+
+
 def collect(
     port: str = serial_io.DEFAULT_PORT,
     baud: int = serial_io.DEFAULT_BAUD,
@@ -64,14 +80,18 @@ def collect(
     quiet: bool = False,
     fix_only: bool = False,
     emit_on: str = "GGA",
+    rtcm_source: Optional[str] = None,
+    rtcm_baud: int = 57600,
 ) -> None:
     """Continuous logging to fixed paths (no switch). Stops on Ctrl-C."""
     asm = GnssAssembler(emit_on=emit_on)
     csv_logger = CsvLogger(csv_path) if csv_path else None
     gpx_logger = GpxLogger(gpx_path) if gpx_path else None
+    injector = None
     count = fixes = 0
     try:
         with serial_io.open_port(port, baud) as ser:
+            injector = _make_injector(ser, rtcm_source, rtcm_baud)
             if not quiet:
                 _log(f"Listening on {port} @ {baud} 8N1 — Ctrl-C to stop")
             for line in serial_io.read_lines(ser):
@@ -89,11 +109,13 @@ def collect(
                 if gpx_logger:
                     gpx_logger.write(reading, now)
                 if not quiet:
-                    sys.stdout.write("\r" + _status(reading))
+                    sys.stdout.write("\r" + _corr_tag(injector) + _status(reading))
                     sys.stdout.flush()
     except KeyboardInterrupt:
         pass
     finally:
+        if injector:
+            injector.stop()
         if csv_logger:
             csv_logger.close()
         if gpx_logger:
@@ -111,6 +133,8 @@ def collect_switched(
     gpx: bool = True,
     quiet: bool = False,
     emit_on: str = "GGA",
+    rtcm_source: Optional[str] = None,
+    rtcm_baud: int = 57600,
 ) -> None:
     """Switch-gated collection service (one file set per switch-ON period)."""
     if controls is None:
@@ -121,10 +145,12 @@ def collect_switched(
     session: Optional[_Session] = None
     last_reading = None
     last_flush = time.monotonic()
+    injector = None
 
     _log(f"service up on {port} @ {baud} 8N1; waiting for switch")
     try:
         with serial_io.open_port(port, baud, timeout=0.25) as ser:
+            injector = _make_injector(ser, rtcm_source, rtcm_baud)
             for line in serial_io.read_lines(ser, idle_tick=True):
                 logging_on = controls.logging_on
 
@@ -152,11 +178,13 @@ def collect_switched(
 
                 if not quiet and reading is not None:
                     state = "LOG" if session is not None else "idle"
-                    sys.stdout.write(f"\r[{state}] {_status(reading)}")
+                    sys.stdout.write(f"\r[{state}] {_corr_tag(injector)}{_status(reading)}")
                     sys.stdout.flush()
     except KeyboardInterrupt:
         pass
     finally:
+        if injector:
+            injector.stop()
         if session is not None:
             session.close()
             _log(f"logging stopped on exit -> {session.name}")

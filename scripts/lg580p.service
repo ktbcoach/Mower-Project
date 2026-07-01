@@ -12,7 +12,7 @@ ExecStart=__PYTHON__ -m lg580p collect --switch \
   --port __PORT__ --baud __BAUD__ \
   --hat-stack __HAT_STACK__ \
   --gps-led __GPS_LED__ --logging-led __LOGGING_LED__ \
-  --contact-channel __CONTACT_CH__ \
+  --contact-channel __CONTACT_CH__ __RTCM_ARGS__ \
   --log-dir __APPDIR__/logs --quiet
 Restart=always
 RestartSec=3

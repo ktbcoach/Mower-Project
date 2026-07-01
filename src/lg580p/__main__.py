@@ -71,6 +71,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
             port=args.port, baud=args.baud, controls=controls,
             log_dir=args.log_dir, fix_only=args.fix_only,
             gpx=not args.no_gpx, quiet=args.quiet,
+            rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud,
         )
         return 0
 
@@ -79,7 +80,8 @@ def cmd_collect(args: argparse.Namespace) -> int:
     if csv_path is None and gpx_path is None:
         csv_path = f"{args.log_dir}/lg580p-{_default_stamp()}.csv"
     collect(port=args.port, baud=args.baud, csv_path=csv_path, gpx_path=gpx_path,
-            quiet=args.quiet, fix_only=args.fix_only)
+            quiet=args.quiet, fix_only=args.fix_only,
+            rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud)
     return 0
 
 
@@ -165,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument("--quiet", action="store_true", help="suppress the live status line")
     co.add_argument("--csv", help="CSV output path (default: <log-dir>/lg580p-<ts>.csv)")
     co.add_argument("--gpx", help="also write a GPX track of fixes")
+    co.add_argument("--rtcm-source",
+                    help="serial port of the RTCM correction radio (e.g. /dev/ttyUSB0); "
+                         "forwarded to the LG580P for RTK")
+    co.add_argument("--rtcm-baud", type=int, default=57600,
+                    help="baud of the RTCM correction radio (default: 57600)")
     sw = co.add_argument_group("switch mode (Multi-IO HAT dry-contact + LEDs)")
     sw.add_argument("--switch", action="store_true",
                     help="gate logging with the HAT dry-contact switch")
