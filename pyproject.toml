@@ -23,6 +23,7 @@ pi = ["SMmultiio", "gpiozero>=2.0", "lgpio>=0.2"]
 
 [project.scripts]
 watson-dms = "watson_dms.__main__:main"
+lg580p = "lg580p.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

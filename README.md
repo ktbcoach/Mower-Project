@@ -3,6 +3,11 @@
 Data collection system for a **Watson DMS-SGP02** (dual-antenna GPS + inertial
 measurement system) connected to a **Raspberry Pi 4** through an **RS232 pHAT**.
 
+> **Two loggers live here.** `watson_dms` (this README) is the original Watson
+> proprietary-format logger. `lg580p` is a parallel NMEA/RTK logger for the
+> **SparkFun LG580P GNSS pHAT** — see [`docs/LG580P.md`](docs/LG580P.md). They
+> share nothing at runtime; pick the one matching your hardware.
+
 The DMS-SGP02 streams true-north heading, attitude, angular rates,
 accelerations, and GPS position over RS-232. This project reads that stream,
 parses it, and logs it to CSV and/or GPX — built for capturing position and
