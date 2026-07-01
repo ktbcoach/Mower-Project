@@ -47,8 +47,15 @@ sudo reboot
 #    be visible; the [pi] extra adds multiio for the HAT button/LEDs.
 cd gps-collector
 python3 -m venv --system-site-packages .venv && source .venv/bin/activate
-pip install -e ".[pi]"      # pyserial + SMmultiio + gpiozero + `watson-dms` cmd
+pip install -e ".[pi]"      # pyserial + SMmultiio (HAT). Adds the CLI commands.
 ```
+
+> The `[pi]` extra is pure Python (Multi-IO HAT path). For the **direct-GPIO**
+> switch fallback add `[gpio]` (gpiozero + lgpio) — but `lgpio` builds from
+> source, so either use the apt packages (`sudo apt install python3-lgpio
+> python3-gpiozero`) with the `--system-site-packages` venv, or
+> `sudo apt install swig python3-dev` first. For just `detect`/`capture`,
+> plain `pip install -e .` (pyserial only) is enough.
 
 Make sure your user is in the `dialout` (serial), `i2c` (HAT), and `gpio`
 groups: `sudo usermod -aG dialout,i2c,gpio $USER` (log out/in afterward).

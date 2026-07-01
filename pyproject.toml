@@ -11,15 +11,13 @@ dependencies = ["pyserial>=3.5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
-# Pi I/O support:
-#   - multiio: Sequent Multi-IO HAT button/LEDs over I2C (default control source)
-#   - gpiozero/lgpio: fallback for a switch+LED wired directly to Pi GPIO
-# On Raspberry Pi OS gpiozero/lgpio ship via apt, so a venv created with
-# --system-site-packages (see README) is the recommended path; this extra is
-# the fallback for a pip-only install.
-# Note: the Sequent library is published to PyPI as "SMmultiio" but imports as
-# `multiio`.
-pi = ["SMmultiio", "gpiozero>=2.0", "lgpio>=0.2"]
+# Multi-IO HAT switch/LEDs over I2C (pure Python — the default control source).
+# The Sequent library is published to PyPI as "SMmultiio" but imports as `multiio`.
+pi = ["SMmultiio"]
+# Direct-GPIO switch/LED fallback only. lgpio builds from source unless swig +
+# python3-dev are installed; on Raspberry Pi OS prefer the apt packages
+# (python3-lgpio, python3-gpiozero) with a --system-site-packages venv.
+gpio = ["gpiozero>=2.0", "lgpio>=0.2"]
 
 [project.scripts]
 watson-dms = "watson_dms.__main__:main"
