@@ -154,3 +154,23 @@ def test_assembler_rtk_fixed_quality():
 def test_reading_altitude_ft():
     r = GnssAssembler().push(GGA)
     assert r.altitude_ft == pytest.approx(545.4 / 0.3048, rel=1e-6)
+
+
+# --- config command builder --------------------------------------------------
+
+def test_command_build_matches_known_checksums():
+    from lg580p.command import build
+    # From the LG580P PQTM command reference (*68 and *5A are documented).
+    assert build("PQTMCFGBLD,W,1.000") == "$PQTMCFGBLD,W,1.000*68\r\n"
+    assert build("PQTMSAVEPAR") == "$PQTMSAVEPAR*5A\r\n"
+
+
+def test_command_build_strips_existing_wrapper():
+    from lg580p.command import build
+    assert build("$PQTMSAVEPAR*5A") == "$PQTMSAVEPAR*5A\r\n"
+
+
+def test_baseline_commands():
+    from lg580p.command import baseline_commands
+    assert baseline_commands(1.0) == ["PQTMCFGBLD,W,1.000", "PQTMSAVEPAR"]
+    assert baseline_commands(0.75, save=False) == ["PQTMCFGBLD,W,0.750"]

@@ -83,6 +83,40 @@ def cmd_collect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_config(args: argparse.Namespace) -> int:
+    """Send PQTM config command(s) and show the receiver's response."""
+    from .command import baseline_commands, build, send
+    saved = False
+    if args.config_cmd == "set-baseline":
+        saved = not args.no_save
+        sentences = baseline_commands(args.meters, save=saved)
+    elif args.config_cmd == "get-baseline":
+        sentences = ["PQTMCFGBLD,R"]
+    elif args.config_cmd == "save":
+        saved = True
+        sentences = ["PQTMSAVEPAR"]
+    elif args.config_cmd == "send":
+        saved = args.save
+        sentences = [args.sentence] + (["PQTMSAVEPAR"] if saved else [])
+    else:
+        print("# no config subcommand", file=sys.stderr)
+        return 2
+
+    print("# Sending:")
+    for s in sentences:
+        print("   " + build(s).strip())
+    responses = send(args.port, args.baud, sentences, args.listen)
+    acks = [r for r in responses if r.startswith("$PQTM")]
+    print(f"\n# {len(responses)} lines seen; PQTM responses:")
+    for r in acks:
+        print("   " + r)
+    if not acks:
+        print("   (none — is the port free? stop the logger/service first)")
+    if saved:
+        print("\n# Saved to flash — power-cycle the module to apply.")
+    return 0
+
+
 def cmd_parse(args: argparse.Namespace) -> int:
     """Parse a captured NMEA text file into assembled GnssReadings."""
     from .assembler import GnssAssembler
@@ -151,6 +185,28 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--emit-on", default="GGA",
                     help="sentence type that ends an epoch (default: GGA)")
     pr.set_defaults(func=cmd_parse)
+
+    cfg = sub.add_parser("config", parents=[common],
+                         help="send PQTM config commands (baseline, save, raw)")
+    cfg.add_argument("--baud", type=int, default=serial_io.DEFAULT_BAUD)
+    cfg.add_argument("--listen", type=float, default=2.0,
+                     help="seconds to collect the response (default: 2)")
+    csub = cfg.add_subparsers(dest="config_cmd", required=True)
+
+    sb = csub.add_parser("set-baseline",
+                         help="set dual-antenna baseline distance (meters, 0-5)")
+    sb.add_argument("meters", type=float, help="antenna separation in meters (0=auto)")
+    sb.add_argument("--no-save", action="store_true",
+                    help="don't persist to flash (default: save)")
+
+    csub.add_parser("get-baseline", help="read the configured baseline distance")
+    csub.add_parser("save", help="save current config to flash (PQTMSAVEPAR)")
+
+    snd = csub.add_parser("send", help="send a raw PQTM/NMEA command (checksum added)")
+    snd.add_argument("sentence", help="command body, e.g. 'PQTMCFGBLD,W,1.000'")
+    snd.add_argument("--save", action="store_true", help="also send PQTMSAVEPAR")
+
+    cfg.set_defaults(func=cmd_config)
 
     return p
 
