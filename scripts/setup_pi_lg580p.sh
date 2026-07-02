@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# One-time Raspberry Pi setup for the SparkFun LG580P GNSS Flex pHAT.
+# One-time Raspberry Pi setup for the LG580P rover (GNSS pHAT + Multi-IO HAT).
 #
-# The LG580P pHAT uses the Pi's PRIMARY UART (GPIO14/15 -> /dev/serial0). This:
-#   1. Enables the UART hardware.
-#   2. Maps the capable PL011 to GPIO14/15 (dtoverlay=disable-bt) for reliable
-#      high baud rates (up to 921600) — the mini-UART is flaky at those speeds.
-#   3. Disables the serial login console so it doesn't fight the receiver.
+#   1. LG580P GNSS pHAT: PRIMARY UART on the PL011 (GPIO14/15 -> /dev/serial0),
+#      mapped via dtoverlay=disable-bt for reliable high baud (up to 921600 —
+#      the mini-UART is flaky). Serial login console disabled.
+#   2. Multi-IO HAT: I2C (switch + status LEDs) and UART5 (GPIO12/13 ->
+#      /dev/ttyAMA5) — the HAT's RS232 port carries the RTCM correction radio.
 #
-# NOTE: This is separate from setup_pi.sh (the Watson unit's UART5 setup).
+# Hardware: the RTCM radio plugs into the Multi-IO HAT's RS232 (UPPER DB9;
+# silkscreen reversed). The J2 RX jumper must be installed (GPIO13 / pin 33).
 # Run with sudo, then reboot:  sudo bash scripts/setup_pi_lg580p.sh && sudo reboot
 set -euo pipefail
 
@@ -28,6 +29,10 @@ echo "Enabling primary UART on the PL011 (GPIO14/15 -> /dev/serial0)..."
 ensure_line "enable_uart=1"
 ensure_line "dtoverlay=disable-bt"
 
+echo "Enabling Multi-IO HAT: I2C (switch/LEDs) + UART5 (RS232 RTCM radio)..."
+ensure_line "dtparam=i2c_arm=on"
+ensure_line "dtoverlay=uart5"   # GPIO12/13 -> /dev/ttyAMA5
+
 echo "Disabling the serial login console..."
 systemctl stop  serial-getty@ttyAMA0.service 2>/dev/null || true
 systemctl disable serial-getty@ttyAMA0.service 2>/dev/null || true
@@ -42,6 +47,6 @@ fi
 
 echo
 echo "Done. Reboot:  sudo reboot"
-echo "After reboot, verify /dev/serial0 and find the baud rate:"
-echo "    ls -l /dev/serial0"
+echo "After reboot, verify the device nodes and find the GNSS baud rate:"
+echo "    ls -l /dev/serial0 /dev/ttyAMA5   # GNSS ; HAT RS232 (RTCM radio)"
 echo "    python -m lg580p detect --port /dev/serial0"
