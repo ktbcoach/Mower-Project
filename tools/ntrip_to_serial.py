@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import os
 import socket
 import sys
 import time
@@ -171,8 +172,10 @@ def main() -> int:
     p.add_argument("--host", required=True)
     p.add_argument("--port", type=int, default=2101)
     p.add_argument("--mountpoint", required=True)
-    p.add_argument("--user", default="")
-    p.add_argument("--password", default="")
+    # Prefer env vars so credentials stay out of shell history / process list
+    # (and out of the repo). Set NTRIP_USER / NTRIP_PASSWORD, or pass --user/--password.
+    p.add_argument("--user", default=os.environ.get("NTRIP_USER", ""))
+    p.add_argument("--password", default=os.environ.get("NTRIP_PASSWORD", ""))
     p.add_argument("--serial", help="base radio serial port; omit to MONITOR/validate only")
     p.add_argument("--serial-baud", type=int, default=57600)
     p.add_argument("--lat", type=float, help="fixed GGA latitude (VRS mountpoints)")
