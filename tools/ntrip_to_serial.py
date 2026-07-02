@@ -97,6 +97,44 @@ class RtcmScanner:
         return "  ".join(f"{m}:{n}" for m, n in sorted(self.counts.items()))
 
 
+def list_sourcetable(args) -> int:
+    """Fetch and print the caster's sourcetable (available mountpoints)."""
+    sock = socket.create_connection((args.host, args.port), timeout=10)
+    auth = base64.b64encode(f"{args.user}:{args.password}".encode()).decode()
+    req = (
+        f"GET / HTTP/1.1\r\n"
+        f"Host: {args.host}:{args.port}\r\n"
+        f"Ntrip-Version: Ntrip/2.0\r\n"
+        f"User-Agent: NTRIP lg580p-bridge/0.1\r\n"
+        f"Authorization: Basic {auth}\r\n"
+        f"Connection: close\r\n\r\n"
+    )
+    sock.sendall(req.encode())
+    data = b""
+    sock.settimeout(10)
+    try:
+        while b"ENDSOURCETABLE" not in data:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+    except socket.timeout:
+        pass
+    text = data.decode(errors="replace")
+    print(f"# {text.splitlines()[0] if text else '(no response)'}")
+    mounts = [ln.split(";") for ln in text.splitlines() if ln.startswith("STR;")]
+    if mounts:
+        print(f"# {len(mounts)} mountpoint(s):")
+        for p in mounts:
+            name = p[1] if len(p) > 1 else "?"
+            fmt = p[3] if len(p) > 3 else ""
+            print(f"    {name:<28} {fmt}")
+    else:
+        print("# no STR entries (sourcetable empty, restricted, or account inactive):")
+        print(text[:600])
+    return 0
+
+
 def connect(args) -> socket.socket:
     sock = socket.create_connection((args.host, args.port), timeout=10)
     auth = base64.b64encode(f"{args.user}:{args.password}".encode()).decode()
@@ -171,7 +209,9 @@ def main() -> int:
     p = argparse.ArgumentParser(description="NTRIP -> serial radio bridge")
     p.add_argument("--host", required=True)
     p.add_argument("--port", type=int, default=2101)
-    p.add_argument("--mountpoint", required=True)
+    p.add_argument("--mountpoint", help="required unless --list")
+    p.add_argument("--list", action="store_true",
+                   help="print the caster's sourcetable (mountpoints) and exit")
     # Prefer env vars so credentials stay out of shell history / process list
     # (and out of the repo). Set NTRIP_USER / NTRIP_PASSWORD, or pass --user/--password.
     p.add_argument("--user", default=os.environ.get("NTRIP_USER", ""))
@@ -182,7 +222,12 @@ def main() -> int:
     p.add_argument("--lon", type=float, help="fixed GGA longitude")
     p.add_argument("--alt", type=float, default=100.0, help="fixed GGA altitude (m)")
     p.add_argument("--gga-interval", type=float, default=10.0)
-    return run(p.parse_args())
+    args = p.parse_args()
+    if args.list:
+        return list_sourcetable(args)
+    if not args.mountpoint:
+        p.error("--mountpoint is required (or use --list to see available ones)")
+    return run(args)
 
 
 if __name__ == "__main__":
