@@ -12,14 +12,19 @@ enable that. Single-base mountpoints don't need it.
 
 Standalone: only needs pyserial + the standard library.
 
-Examples:
-    # 1. Validate the caster/mountpoint (no radio needed — MONITOR mode):
-    python3 ntrip_to_serial.py --host 20.185.11.35 --port 2101 \
-        --mountpoint VTRI_VTRI_RTCM3 --user USER --password PASS
+Use an RTCM 3.x mountpoint (e.g. the nearest station, VCAP_RTCM3) — NOT a CMRx
+mountpoint (Trimble proprietary; the LG580P can't decode it). Credentials come
+from NTRIP_USER / NTRIP_PASSWORD.
 
-    # 2. Bridge corrections to the base radio:
-    python3 ntrip_to_serial.py --host 20.185.11.35 --port 2101 \
-        --mountpoint VTRI_VTRI_RTCM3 --user USER --password PASS \
+Examples:
+    # List available mountpoints:
+    python3 ntrip_to_serial.py --host 20.185.11.35 --port 2101 --list
+
+    # Validate a mountpoint (no radio — MONITOR mode):
+    python3 ntrip_to_serial.py --host 20.185.11.35 --port 2101 --mountpoint VCAP_RTCM3
+
+    # Bridge corrections to the base radio:
+    python3 ntrip_to_serial.py --host 20.185.11.35 --port 2101 --mountpoint VCAP_RTCM3 \
         --serial /dev/ttyUSB0 --serial-baud 57600
 """
 
