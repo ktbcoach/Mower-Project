@@ -82,7 +82,9 @@ def test_parse_vtg():
 
 
 def test_parse_rejects_bad_checksum():
-    assert parse(GGA.replace("545.4", "999.9")) is None
+    # Use a checksum-breaking edit: 545.4 -> 999.9 is XOR-neutral (the checksum
+    # stays valid), so it wouldn't actually exercise the rejection path.
+    assert parse(GGA.replace("545.4", "545.5")) is None
 
 
 def test_parse_ths_void_is_no_heading():
