@@ -54,6 +54,12 @@ class GnssReading:
     roll_deg: Optional[float] = None
     heading_accuracy_deg: Optional[float] = None
     baseline_m: Optional[float] = None
+    # Signal-quality summary for the epoch (aggregated from GSV C/N0 across all
+    # constellations; best C/N0 kept per satellite). Handy for spotting a weak
+    # antenna at a glance.
+    sats_tracked: Optional[int] = None       # unique sats in view with a C/N0
+    cn0_max: Optional[float] = None          # strongest satellite C/N0 (dB-Hz)
+    cn0_avg: Optional[float] = None          # mean C/N0 of tracked sats (dB-Hz)
     # Which sentence types contributed to this epoch (diagnostic).
     sources: list = field(default_factory=list)
 

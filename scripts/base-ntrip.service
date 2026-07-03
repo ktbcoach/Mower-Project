@@ -14,7 +14,8 @@ WorkingDirectory=__APPDIR__
 EnvironmentFile=__ENV_FILE__
 ExecStart=__PYTHON__ __APPDIR__/tools/ntrip_to_serial.py \
   --host __HOST__ --port __PORT__ --mountpoint __MOUNTPOINT__ \
-  --serial __SERIAL__ --serial-baud __SERIAL_BAUD__ __GGA_ARGS__
+  --serial __SERIAL__ --serial-baud __SERIAL_BAUD__ \
+  --status-file __STATUS_FILE__ __GGA_ARGS__
 Restart=always
 RestartSec=5
 StandardOutput=journal

@@ -72,6 +72,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
             log_dir=args.log_dir, fix_only=args.fix_only,
             gpx=not args.no_gpx, quiet=args.quiet,
             rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud,
+            telemetry=args.telemetry, telemetry_interval=args.telemetry_interval,
         )
         return 0
 
@@ -81,7 +82,8 @@ def cmd_collect(args: argparse.Namespace) -> int:
         csv_path = f"{args.log_dir}/lg580p-{_default_stamp()}.csv"
     collect(port=args.port, baud=args.baud, csv_path=csv_path, gpx_path=gpx_path,
             quiet=args.quiet, fix_only=args.fix_only,
-            rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud)
+            rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud,
+            telemetry=args.telemetry, telemetry_interval=args.telemetry_interval)
     return 0
 
 
@@ -172,6 +174,11 @@ def build_parser() -> argparse.ArgumentParser:
                          "forwarded to the LG580P for RTK")
     co.add_argument("--rtcm-baud", type=int, default=57600,
                     help="baud of the RTCM correction radio (default: 57600)")
+    co.add_argument("--telemetry", action="store_true",
+                    help="send $PRSTAT status out the RTCM radio for the base display "
+                         "(requires --rtcm-source; shares the radio full-duplex)")
+    co.add_argument("--telemetry-interval", type=float, default=1.0,
+                    help="seconds between telemetry sends (default: 1.0)")
     sw = co.add_argument_group("switch mode (Multi-IO HAT dry-contact + LEDs)")
     sw.add_argument("--switch", action="store_true",
                     help="gate logging with the HAT dry-contact switch")

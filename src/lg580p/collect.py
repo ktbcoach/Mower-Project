@@ -11,8 +11,27 @@ from typing import Optional
 from . import serial_io
 from .assembler import GnssAssembler
 from .logger import CsvLogger, GpxLogger
+from .telemetry import build_status_sentence
 
 _FLUSH_INTERVAL_S = 2.0
+
+
+class _Telemeter:
+    """Throttle + send rover status ($PRSTAT) back out the radio for the base."""
+
+    def __init__(self, injector, interval: float):
+        self._inj = injector
+        self._interval = interval
+        self._seq = 0
+        self._last = 0.0
+
+    def maybe_send(self, reading, logging_on: bool, now_mono: float) -> None:
+        if self._inj is None or now_mono - self._last < self._interval:
+            return
+        self._last = now_mono
+        line = build_status_sentence(reading, self._seq, logging_on, self._inj.flowing)
+        self._inj.send_line(line)
+        self._seq = (self._seq + 1) & 0xFFFF
 
 
 def _log(msg: str) -> None:
@@ -82,22 +101,30 @@ def collect(
     emit_on: str = "GGA",
     rtcm_source: Optional[str] = None,
     rtcm_baud: int = 57600,
+    telemetry: bool = False,
+    telemetry_interval: float = 1.0,
 ) -> None:
     """Continuous logging to fixed paths (no switch). Stops on Ctrl-C."""
     asm = GnssAssembler(emit_on=emit_on)
     csv_logger = CsvLogger(csv_path) if csv_path else None
     gpx_logger = GpxLogger(gpx_path) if gpx_path else None
     injector = None
+    telemeter = None
     count = fixes = 0
     try:
         with serial_io.open_port(port, baud) as ser:
             injector = _make_injector(ser, rtcm_source, rtcm_baud)
+            if telemetry and injector is not None:
+                telemeter = _Telemeter(injector, telemetry_interval)
+                _log(f"telemetry -> radio every {telemetry_interval:g}s")
             if not quiet:
                 _log(f"Listening on {port} @ {baud} 8N1 — Ctrl-C to stop")
             for line in serial_io.read_lines(ser):
                 reading = asm.push(line)
                 if reading is None:
                     continue
+                if telemeter is not None:
+                    telemeter.maybe_send(reading, True, time.monotonic())
                 if fix_only and not reading.has_gps_fix:
                     continue
                 now = _dt.datetime.now(_dt.timezone.utc)
@@ -135,6 +162,8 @@ def collect_switched(
     emit_on: str = "GGA",
     rtcm_source: Optional[str] = None,
     rtcm_baud: int = 57600,
+    telemetry: bool = False,
+    telemetry_interval: float = 1.0,
 ) -> None:
     """Switch-gated collection service (one file set per switch-ON period)."""
     if controls is None:
@@ -146,11 +175,15 @@ def collect_switched(
     last_reading = None
     last_flush = time.monotonic()
     injector = None
+    telemeter = None
 
     _log(f"service up on {port} @ {baud} 8N1; waiting for switch")
     try:
         with serial_io.open_port(port, baud, timeout=0.25) as ser:
             injector = _make_injector(ser, rtcm_source, rtcm_baud)
+            if telemetry and injector is not None:
+                telemeter = _Telemeter(injector, telemetry_interval)
+                _log(f"telemetry -> radio every {telemetry_interval:g}s")
             for line in serial_io.read_lines(ser, idle_tick=True):
                 logging_on = controls.logging_on
 
@@ -172,6 +205,8 @@ def collect_switched(
                 controls.update_indicator(session is not None, last_reading)
 
                 now = time.monotonic()
+                if telemeter is not None:
+                    telemeter.maybe_send(last_reading, session is not None, now)
                 if session is not None and now - last_flush >= _FLUSH_INTERVAL_S:
                     session.flush()
                     last_flush = now

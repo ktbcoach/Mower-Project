@@ -35,6 +35,7 @@ import base64
 import os
 import socket
 import sys
+import threading
 import time
 
 try:
@@ -140,6 +141,46 @@ def list_sourcetable(args) -> int:
     return 0
 
 
+def _write_atomic(path: str, text: str) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
+def status_reader(ser, path: str, stop: threading.Event) -> None:
+    """Read the radio for rover ``$PRSTAT`` telemetry and mirror the latest line
+    to ``path`` (the base display polls it). Runs in its own thread; the serial
+    port is full-duplex so this reads while the main loop writes RTCM.
+
+    Kept deliberately dumb (no parsing) so this file stays standalone — the
+    display parses the line via lg580p.telemetry.
+    """
+    buf = bytearray()
+    while not stop.is_set():
+        try:
+            data = ser.read(256)
+        except Exception:
+            time.sleep(0.5)
+            continue
+        if not data:
+            continue
+        buf.extend(data)
+        while True:
+            nl = buf.find(b"\n")
+            if nl == -1:
+                if len(buf) > 4096:  # runaway with no newline — keep the tail
+                    del buf[:-512]
+                break
+            line = bytes(buf[:nl]).decode("ascii", "replace").strip()
+            del buf[: nl + 1]
+            if line.startswith("$PRSTAT"):
+                try:
+                    _write_atomic(path, line + "\n")
+                except OSError as exc:
+                    print(f"# status-file write failed: {exc}")
+
+
 def connect(args) -> socket.socket:
     sock = socket.create_connection((args.host, args.port), timeout=10)
     auth = base64.b64encode(f"{args.user}:{args.password}".encode()).decode()
@@ -168,9 +209,16 @@ def connect(args) -> socket.socket:
 
 def run(args) -> int:
     ser = None
+    stop = threading.Event()
     if args.serial:
         ser = serial.Serial(args.serial, args.serial_baud, timeout=1)
         print(f"# forwarding RTCM -> {args.serial} @ {args.serial_baud}")
+        if args.status_file:
+            threading.Thread(
+                target=status_reader, args=(ser, args.status_file, stop),
+                name="status", daemon=True,
+            ).start()
+            print(f"# rover telemetry -> {args.status_file}")
     else:
         print("# MONITOR mode (no --serial): validating the stream only")
     gga = None
@@ -203,6 +251,7 @@ def run(args) -> int:
                     sock.sendall(gga)
                     last_gga = now
         except KeyboardInterrupt:
+            stop.set()
             print("\n# stopped")
             return 0
         except Exception as exc:
@@ -223,6 +272,8 @@ def main() -> int:
     p.add_argument("--password", default=os.environ.get("NTRIP_PASSWORD", ""))
     p.add_argument("--serial", help="base radio serial port; omit to MONITOR/validate only")
     p.add_argument("--serial-baud", type=int, default=57600)
+    p.add_argument("--status-file",
+                   help="mirror the rover's latest $PRSTAT telemetry here (for the base display)")
     p.add_argument("--lat", type=float, help="fixed GGA latitude (VRS mountpoints)")
     p.add_argument("--lon", type=float, help="fixed GGA longitude")
     p.add_argument("--alt", type=float, default=100.0, help="fixed GGA altitude (m)")

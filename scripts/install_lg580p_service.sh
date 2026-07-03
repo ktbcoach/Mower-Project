@@ -36,6 +36,14 @@ if [[ -n "$RTCM_SOURCE" ]]; then
 else
   RTCM_ARGS=""
 fi
+# Rover -> base status telemetry over the same radio (needs RTCM_SOURCE).
+# Enable with TELEMETRY=1.
+TELEMETRY="${TELEMETRY:-0}"
+if [[ -n "$RTCM_SOURCE" && "$TELEMETRY" != "0" ]]; then
+  TELEMETRY_ARGS="--telemetry"
+else
+  TELEMETRY_ARGS=""
+fi
 
 TEMPLATE="$APPDIR/scripts/lg580p.service"
 TARGET="/etc/systemd/system/lg580p.service"
@@ -44,6 +52,7 @@ echo "Installing lg580p service:"
 echo "  user=$RUN_USER  python=$PYTHON"
 echo "  port/baud=$PORT @ $BAUD  HAT stack=$HAT_STACK"
 echo "  GPS LED=$GPS_LED  logging LED=$LOGGING_LED  contact ch=$CONTACT_CH"
+[[ -n "$RTCM_ARGS" ]] && echo "  RTCM=$RTCM_SOURCE @ $RTCM_BAUD  telemetry=${TELEMETRY_ARGS:-off}"
 
 sed \
   -e "s#__USER__#${RUN_USER}#g" \
@@ -56,6 +65,7 @@ sed \
   -e "s#__LOGGING_LED__#${LOGGING_LED}#g" \
   -e "s#__CONTACT_CH__#${CONTACT_CH}#g" \
   -e "s#__RTCM_ARGS__#${RTCM_ARGS}#g" \
+  -e "s#__TELEMETRY_ARGS__#${TELEMETRY_ARGS}#g" \
   "$TEMPLATE" > "$TARGET"
 
 mkdir -p "$APPDIR/logs"

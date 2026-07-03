@@ -24,6 +24,8 @@ class RtcmInjector:
         self._source_baud = source_baud
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._src = None                  # open radio Serial, once the thread has it
+        self._write_lock = threading.Lock()
         self.bytes_forwarded = 0
         self.last_rx = 0.0                # monotonic time of last bytes received
         self.error: Optional[str] = None
@@ -42,16 +44,37 @@ class RtcmInjector:
         while not self._stop.is_set():
             try:
                 with serial.Serial(self._source_port, self._source_baud, timeout=0.5) as src:
+                    self._src = src
                     self.error = None
-                    while not self._stop.is_set():
-                        data = src.read(512)
-                        if data:
-                            self._dest.write(data)
-                            self.bytes_forwarded += len(data)
-                            self.last_rx = time.monotonic()
+                    try:
+                        while not self._stop.is_set():
+                            data = src.read(512)
+                            if data:
+                                self._dest.write(data)
+                                self.bytes_forwarded += len(data)
+                                self.last_rx = time.monotonic()
+                    finally:
+                        self._src = None
             except Exception as exc:  # radio absent/unplugged — report and retry
+                self._src = None
                 self.error = str(exc)
                 self._stop.wait(2.0)
+
+    def send_line(self, text: str) -> bool:
+        """Write a line OUT the radio (rover -> base telemetry). Best-effort:
+        returns False if the radio isn't open yet. Full-duplex — the read loop
+        keeps running while we write, so a lock guards concurrent writers only.
+        """
+        src = self._src
+        if src is None:
+            return False
+        try:
+            with self._write_lock:
+                src.write((text + "\r\n").encode("ascii", "replace"))
+            return True
+        except Exception as exc:
+            self.error = str(exc)
+            return False
 
     def stop(self) -> None:
         self._stop.set()

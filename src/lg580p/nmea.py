@@ -167,6 +167,9 @@ def parse(sentence: str) -> Optional[dict]:
         heading = _f(f[0]) if status not in ("", "V") else None
         return {"type": "THS", "heading_deg": heading}
 
+    if typ == "GSV":
+        return None  # handled separately by the assembler (see parse_gsv)
+
     if typ == "PQTMTAR" and len(f) >= 12:
         # $PQTMTAR,MsgVer,UTC,Quality,Res,Length,Pitch,Roll,Heading,
         #         AccPitch,AccRoll,AccHeading,UsedSV*CS   (Quectel spec / confirmed
@@ -183,3 +186,28 @@ def parse(sentence: str) -> Optional[dict]:
         }
 
     return None
+
+
+def parse_gsv(sentence: str) -> list[tuple[str, int, Optional[int], Optional[int]]]:
+    """Parse a GSV sentence -> list of ``(constellation, prn, elevation, cn0)``.
+
+    ``constellation`` is the two-letter talker (``GP``/``GL``/``GA``/``GB``…),
+    ``cn0`` is C/N0 in dB-Hz (``None`` when the field is blank, i.e. in view but
+    not tracked). Returns ``[]`` on a bad checksum or non-GSV line. GSV data
+    fields repeat in blocks of four: prn, elevation, azimuth, C/N0, optionally
+    followed by a trailing signal-ID field (ignored — the ``// 4`` drops it).
+    """
+    if not is_sentence(sentence) or not checksum_ok(sentence):
+        return []
+    if sentence_type(sentence) != "GSV":
+        return []
+    addr = address(sentence) or ""
+    constellation = addr[:2] if len(addr) >= 2 else "??"
+    body = _fields(sentence)[3:]  # skip total-msgs, msg-num, sats-in-view
+    sats: list[tuple[str, int, Optional[int], Optional[int]]] = []
+    for i in range(len(body) // 4):
+        prn = _i(body[i * 4])
+        if prn is None:
+            continue
+        sats.append((constellation, prn, _i(body[i * 4 + 1]), _i(body[i * 4 + 3])))
+    return sats

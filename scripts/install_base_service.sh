@@ -32,6 +32,9 @@ PORT="${PORT:-2101}"
 MOUNTPOINT="${MOUNTPOINT:-VCAP_RTCM3}"
 SERIAL="${SERIAL:-/dev/ttyUSB0}"
 SERIAL_BAUD="${SERIAL_BAUD:-19200}"
+# Where the rover's $PRSTAT telemetry is mirrored for the display (see
+# tools/rover_display.py, which defaults to this same path).
+STATUS_FILE="${STATUS_FILE:-$APPDIR/rover-status.txt}"
 # Network-RTK / VRS mountpoints need an approximate position (GGA). Set both
 # LAT and LON (decimal degrees) to enable; single-base mountpoints leave unset.
 LAT="${LAT:-}"
@@ -73,6 +76,7 @@ echo "Installing base-ntrip service:"
 echo "  user=$RUN_USER  python=$PYTHON"
 echo "  caster=$HOST:$PORT  mountpoint=$MOUNTPOINT"
 echo "  radio=$SERIAL @ $SERIAL_BAUD"
+echo "  telemetry status file=$STATUS_FILE"
 [[ -n "$GGA_ARGS" ]] && echo "  GGA position=$LAT,$LON (VRS)"
 
 sed \
@@ -85,6 +89,7 @@ sed \
   -e "s#__MOUNTPOINT__#${MOUNTPOINT}#g" \
   -e "s#__SERIAL__#${SERIAL}#g" \
   -e "s#__SERIAL_BAUD__#${SERIAL_BAUD}#g" \
+  -e "s#__STATUS_FILE__#${STATUS_FILE}#g" \
   -e "s#__GGA_ARGS__#${GGA_ARGS}#g" \
   "$TEMPLATE" > "$TARGET"
 

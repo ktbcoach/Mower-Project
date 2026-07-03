@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Rover Status
+Comment=LG580P rover telemetry dashboard (base station)
+Exec=__PYTHON__ __APPDIR__/tools/rover_display.py --status-file __STATUS_FILE__
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;Science;
