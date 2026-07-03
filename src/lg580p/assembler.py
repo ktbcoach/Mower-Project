@@ -24,6 +24,7 @@ class GnssAssembler:
         self._latest: dict = {}
         self._epoch_sources: list[str] = []
         self._signal: dict = {}  # (constellation, prn) -> best C/N0 seen this epoch
+        self._last_signal: dict = {}  # carried forward on epochs with no fresh GSV
 
     def push(self, sentence: str) -> Optional[GnssReading]:
         """Consume one sentence; return a GnssReading when an epoch completes."""
@@ -50,10 +51,15 @@ class GnssAssembler:
             self._epoch_sources.append(typ)
 
         if typ == self._emit_on:
+            # GSV often arrives slower than GGA; carry the last signal summary
+            # forward so C/N0 stays populated between GSV rounds (it changes slowly).
+            summary = self._signal_summary()
+            if summary:
+                self._last_signal = summary
             reading = GnssReading(
                 sources=list(self._epoch_sources),
                 **self._latest,
-                **self._signal_summary(),
+                **(summary or self._last_signal),
             )
             self._epoch_sources = []
             self._signal = {}

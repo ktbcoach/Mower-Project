@@ -39,13 +39,15 @@ def test_assembler_aggregates_signal_across_constellations():
     assert reading.cn0_avg == round((23 + 33 + 32 + 25 + 30 + 36) / 6, 1)  # 29.8
 
 
-def test_assembler_resets_signal_each_epoch():
+def test_assembler_carries_signal_forward_when_no_gsv():
+    # GSV usually arrives slower than GGA, so C/N0 is carried forward between
+    # rounds rather than blanking out every epoch.
     asm = GnssAssembler(emit_on="GGA")
     asm.push(GPGSV)
-    asm.push(GGA)
-    second = asm.push(GGA)              # no GSV this epoch
-    assert second.cn0_max is None
-    assert second.sats_tracked is None
+    first = asm.push(GGA)
+    second = asm.push(GGA)             # no GSV this epoch -> carry the last summary
+    assert second.cn0_max == first.cn0_max
+    assert second.sats_tracked == first.sats_tracked
 
 
 # --- $PRSTAT round trip ------------------------------------------------------
