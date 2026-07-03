@@ -1,0 +1,24 @@
+[Unit]
+Description=VTrans NTRIP -> radio bridge (base station RTK corrections)
+# Needs the network up before dialing the caster.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+# dialout = serial port for the correction radio.
+SupplementaryGroups=dialout
+WorkingDirectory=__APPDIR__
+# NTRIP_USER / NTRIP_PASSWORD live here (gitignored, not in the unit).
+EnvironmentFile=__ENV_FILE__
+ExecStart=__PYTHON__ __APPDIR__/tools/ntrip_to_serial.py \
+  --host __HOST__ --port __PORT__ --mountpoint __MOUNTPOINT__ \
+  --serial __SERIAL__ --serial-baud __SERIAL_BAUD__ __GGA_ARGS__
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

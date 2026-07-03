@@ -20,3 +20,6 @@ Thumbs.db
 
 # Viewer preview artifacts
 tools/preview*.png
+
+# Base-station NTRIP credentials (never commit)
+scripts/ntrip-base.env
