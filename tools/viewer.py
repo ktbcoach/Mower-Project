@@ -2,8 +2,8 @@
 """
 Mower run viewer.
 
-Loads a watson_dms CSV file and displays:
-  - Green shaded area  : total swept blade path (54-inch deck)
+Loads an LG580P (or Watson) CSV file and displays:
+  - Green shaded area  : total swept blade path (54-inch cut)
   - Red line           : mower centre track
   - Black line + arrow : antenna baseline and forward heading at the slider position
   - Slider             : scrub through every logged frame
@@ -23,7 +23,6 @@ import csv
 import math
 import sys
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -31,28 +30,38 @@ import matplotlib.patches as mpatches
 from matplotlib.collections import PolyCollection
 from matplotlib.widgets import Slider
 
-# ── Mower geometry ─────────────────────────────────────────────────────────────
-DECK_WIDTH_M      = 54 * 0.0254   # 54 inches → 1.3716 m
-HALF_DECK_M       = DECK_WIDTH_M / 2
-ANTENNA_SPACING_M = 1.0           # 1 m between antennas
+# ── Mower geometry (LG580P dual-antenna mounting) ───────────────────────────────
+IN = 0.0254   # inches → metres
 
-# The DMS reports position at the AFT (right) antenna.
-# Antennas are 90° to direction of travel; fore antenna is on the LEFT.
-# → aft = right, fore = left.  Centre is 0.5 m leftward of the aft GPS position.
-AFT_TO_CENTRE_M   = ANTENNA_SPACING_M / 2   # 0.5 m
+# Heading correction: the LG580P's PQTMTAR heading runs along the antenna
+# baseline. The primary (position) antenna is on the LEFT and the secondary on
+# the RIGHT, so the baseline (main→secondary) points to the mower's RIGHT — i.e.
+# 90° clockwise of travel. True forward heading = reported + HEADING_OFFSET_DEG.
+# (If the heading arrow ends up pointing backwards, flip this to +90.)
+HEADING_OFFSET_DEG = -90.0
 
-# Deck geometry: 3 blades in an oval, 54" wide × 14" deep fore-aft.
-# (14" = one blade radius (54/3/2 = 9") + 5".)  The BACK edge of the deck sits
-# ~12" forward of the antenna baseline, so the oval's fore-aft centre — where
-# the blades cut full 54" width — is 12 + 14/2 = 19" ahead of the antennas.
-DECK_DEPTH_M       = 14 * 0.0254            # fore-aft depth of the oval (0.356 m)
-DECK_BACK_FWD_M    = 12 * 0.0254            # back of deck ahead of antennas (0.305 m)
-DECK_CENTRE_FWD_M  = DECK_BACK_FWD_M + DECK_DEPTH_M / 2   # 19" → 0.483 m
-N_BLADES           = 3
-BLADE_RADIUS_M     = (DECK_WIDTH_M / N_BLADES) / 2        # 9" → 0.229 m
+# Position is reported at the MAIN (left) antenna. Offsets below are in the mower
+# body frame relative to that antenna: forward = +, right = +.
+ANTENNA_SPACING_M         = 1.0       # configured 1 m baseline (main→secondary)
+RIGHT_ANT_RIGHT_OF_CL_M   = 18 * IN   # right/secondary antenna, 18" right of centreline
+# The main (left) antenna is one baseline left of the secondary, so it sits
+# (baseline − 18") ≈ 21.4" LEFT of the centreline; centreline is that far to its right.
+CENTERLINE_RIGHT_OF_GPS_M = ANTENNA_SPACING_M - RIGHT_ANT_RIGHT_OF_CL_M
+BLADES_FWD_OF_GPS_M       = 24 * IN   # outer blades sit 24" ahead of the antennas
 
-# Arrow drawn from centre toward heading tip.  Scaled to ~60 % of antenna spacing.
-ARROW_LEN_M = ANTENNA_SPACING_M * 0.6
+# Cutting deck: 3 blades. Outer blades 36" apart (centres ±18" from centreline),
+# 9" radius each → 54" cut width. Centre blade on the centreline, 6" ahead of the
+# outer blades.
+CUT_WIDTH_M          = 54 * IN
+HALF_CUT_M           = CUT_WIDTH_M / 2
+BLADE_RADIUS_M       = 9 * IN
+OUTER_BLADE_OFF_M    = 18 * IN        # outer blade centres, ± from centreline
+CENTRE_BLADE_FWD_M   = 6 * IN         # centre blade ahead of the outer blades
+DECK_DEPTH_M         = 24 * IN        # fore-aft blade envelope (visual only)
+N_BLADES             = 3
+
+# Heading arrow length from the mower centre.
+ARROW_LEN_M = 24 * IN
 
 
 # ── Geometry helpers ───────────────────────────────────────────────────────────
@@ -64,16 +73,16 @@ def _lat_lon_to_en(lat: float, lon: float, lat0: float, lon0: float) -> tuple[fl
     return east, north
 
 
-def _left_unit(heading_deg: float) -> tuple[float, float]:
-    """Unit vector 90° left of heading, in (E, N) components."""
-    θ = math.radians(heading_deg)
-    return -math.cos(θ), math.sin(θ)
-
-
 def _forward_unit(heading_deg: float) -> tuple[float, float]:
-    """Unit vector in the heading direction, in (E, N) components."""
+    """Unit vector in the heading direction, in (E, N) components (compass CW from N)."""
     θ = math.radians(heading_deg)
     return math.sin(θ), math.cos(θ)
+
+
+def _right_unit(heading_deg: float) -> tuple[float, float]:
+    """Unit vector 90° right of heading, in (E, N) components."""
+    θ = math.radians(heading_deg)
+    return math.cos(θ), -math.sin(θ)
 
 
 # ── CSV loading ────────────────────────────────────────────────────────────────
@@ -96,7 +105,8 @@ def load_csv(path: Path) -> list[dict]:
                     "lon":          lon,
                     "hdg":          hdg,
                     "host_time":    row.get("host_time", ""),
-                    "velocity_kph": row.get("velocity_kph", ""),
+                    # LG580P logs speed_kph; Watson logs velocity_kph — accept either.
+                    "velocity_kph": row.get("velocity_kph") or row.get("speed_kph") or "",
                     "label":        row.get("label", ""),
                 }
             )
@@ -105,45 +115,49 @@ def load_csv(path: Path) -> list[dict]:
 
 # ── Per-frame geometry ─────────────────────────────────────────────────────────
 def compute_frames(rows: list[dict]) -> dict:
-    """Pre-compute all display geometry in local metres."""
+    """Pre-compute all display geometry in local metres.
+
+    Position (lat/lon) is the MAIN (left) antenna. The reported heading is
+    corrected to true forward (HEADING_OFFSET_DEG) and everything else is placed
+    in the mower body frame relative to the main antenna.
+    """
     lat0 = sum(r["lat"] for r in rows) / len(rows)
     lon0 = sum(r["lon"] for r in rows) / len(rows)
 
-    centres:     list[tuple[float, float]] = []   # midpoint of the antenna baseline
-    fore_ants:   list[tuple[float, float]] = []   # left / fore antenna
-    aft_ants:    list[tuple[float, float]] = []   # right / aft antenna (GPS position)
-    deck_ctrs:   list[tuple[float, float]] = []   # oval centre (19" forward of baseline)
-    left_tips:   list[tuple[float, float]] = []   # left blade tip (at deck centre)
-    right_tips:  list[tuple[float, float]] = []   # right blade tip (at deck centre)
-    headings:    list[float] = []
+    centres:    list[tuple[float, float]] = []   # mower centreline, at the antenna line
+    ant_main:   list[tuple[float, float]] = []   # left / main antenna (GPS position)
+    ant_sec:    list[tuple[float, float]] = []   # right / secondary antenna
+    deck_ctrs:  list[tuple[float, float]] = []   # cut-swath centre (on centreline)
+    left_tips:  list[tuple[float, float]] = []   # left edge of the cut swath
+    right_tips: list[tuple[float, float]] = []   # right edge of the cut swath
+    headings:   list[float] = []                 # true forward heading
 
     for r in rows:
-        E, N    = _lat_lon_to_en(r["lat"], r["lon"], lat0, lon0)
-        lx, ly  = _left_unit(r["hdg"])
-        fx, fy  = _forward_unit(r["hdg"])
+        E, N   = _lat_lon_to_en(r["lat"], r["lon"], lat0, lon0)
+        hdg    = (r["hdg"] + HEADING_OFFSET_DEG) % 360.0
+        fx, fy = _forward_unit(hdg)
+        rx, ry = _right_unit(hdg)
 
-        aft_x,  aft_y  = E, N
-        cx,     cy     = E  + AFT_TO_CENTRE_M   * lx, N  + AFT_TO_CENTRE_M   * ly
-        fore_x, fore_y = E  + ANTENNA_SPACING_M * lx, N  + ANTENNA_SPACING_M * ly
-        # Deck cuts forward of the antennas; blades reach full width at the
-        # oval's fore-aft centre, DECK_CENTRE_FWD_M ahead of the baseline.
-        dcx,    dcy    = cx + DECK_CENTRE_FWD_M * fx, cy + DECK_CENTRE_FWD_M * fy
-        lt_x,   lt_y   = dcx + HALF_DECK_M      * lx, dcy + HALF_DECK_M      * ly
-        rt_x,   rt_y   = dcx - HALF_DECK_M      * lx, dcy - HALF_DECK_M      * ly
+        main = (E, N)
+        sec  = (E + ANTENNA_SPACING_M * rx,        N + ANTENNA_SPACING_M * ry)
+        cen  = (E + CENTERLINE_RIGHT_OF_GPS_M * rx, N + CENTERLINE_RIGHT_OF_GPS_M * ry)
+        deck = (cen[0] + BLADES_FWD_OF_GPS_M * fx, cen[1] + BLADES_FWD_OF_GPS_M * fy)
+        lt   = (deck[0] - HALF_CUT_M * rx,         deck[1] - HALF_CUT_M * ry)
+        rt   = (deck[0] + HALF_CUT_M * rx,         deck[1] + HALF_CUT_M * ry)
 
-        centres.append((cx, cy))
-        fore_ants.append((fore_x, fore_y))
-        aft_ants.append((aft_x, aft_y))
-        deck_ctrs.append((dcx, dcy))
-        left_tips.append((lt_x, lt_y))
-        right_tips.append((rt_x, rt_y))
-        headings.append(r["hdg"])
+        centres.append(cen)
+        ant_main.append(main)
+        ant_sec.append(sec)
+        deck_ctrs.append(deck)
+        left_tips.append(lt)
+        right_tips.append(rt)
+        headings.append(hdg)
 
     return {
         "rows":       rows,
         "centres":    np.array(centres),
-        "fore_ants":  np.array(fore_ants),
-        "aft_ants":   np.array(aft_ants),
+        "ant_main":   np.array(ant_main),
+        "ant_sec":    np.array(ant_sec),
         "deck_ctrs":  np.array(deck_ctrs),
         "left_tips":  np.array(left_tips),
         "right_tips": np.array(right_tips),
@@ -155,7 +169,7 @@ def _swept_quads(geom: dict, max_seg_m: float = 5.0) -> list[np.ndarray]:
     """
     Build the swept blade area as one quadrilateral per frame-to-frame segment.
 
-    Each quad spans the left/right blade tips of consecutive frames:
+    Each quad spans the left/right swath edges of consecutive frames:
         left_tip[i] → left_tip[i+1] → right_tip[i+1] → right_tip[i]
 
     Drawing them individually (instead of one big polygon) means a serpentine
@@ -224,17 +238,17 @@ def view(path: Path) -> None:
     live_patches: list = []   # arrow + deck oval + blades, redrawn each frame
 
     def _update(idx: int) -> None:
-        fore = geom["fore_ants"][idx]
-        aft  = geom["aft_ants"][idx]
-        ctr  = geom["centres"][idx]
+        main = geom["ant_main"][idx]
+        sec  = geom["ant_sec"][idx]
+        cen  = geom["centres"][idx]
         deck = geom["deck_ctrs"][idx]
         hdg  = geom["headings"][idx]
 
-        # Antenna baseline (fore=left to aft=right)
-        ant_line.set_data([fore[0], aft[0]], [fore[1], aft[1]])
+        # Antenna baseline (main=left to secondary=right)
+        ant_line.set_data([main[0], sec[0]], [main[1], sec[1]])
 
-        # Centre dot
-        centre_dot.set_data([ctr[0]], [ctr[1]])
+        # Mower centre dot
+        centre_dot.set_data([cen[0]], [cen[1]])
 
         # Clear previous frame's movable patches.
         for p in live_patches:
@@ -242,16 +256,18 @@ def view(path: Path) -> None:
         live_patches.clear()
 
         fx, fy = _forward_unit(hdg)
-        lx, ly = _left_unit(hdg)
+        rx, ry = _right_unit(hdg)
 
-        # Deck oval (3-blade housing): 54" wide × 14" deep, centred 19" forward.
-        # The ellipse "width" axis must lie along the across-track (left-right)
-        # direction; matplotlib measures angle CCW from +x (east).
-        deck_angle = math.degrees(math.atan2(ly, lx))
+        # Deck oval (3-blade housing): 54" wide (across-track) × ~24" deep,
+        # nudged forward to enclose the leading centre blade. matplotlib measures
+        # the ellipse angle CCW from +x (east); the width axis follows "right".
+        oval_c = (deck[0] + (CENTRE_BLADE_FWD_M / 2) * fx,
+                  deck[1] + (CENTRE_BLADE_FWD_M / 2) * fy)
+        deck_angle = math.degrees(math.atan2(ry, rx))
         oval = mpatches.Ellipse(
-            (deck[0], deck[1]),
-            width=DECK_WIDTH_M,      # across-track (54")
-            height=DECK_DEPTH_M,     # fore-aft (14")
+            oval_c,
+            width=CUT_WIDTH_M,       # across-track (54")
+            height=DECK_DEPTH_M,     # fore-aft
             angle=deck_angle,
             facecolor="none",
             edgecolor="#333333",
@@ -261,11 +277,15 @@ def view(path: Path) -> None:
         ax.add_patch(oval)
         live_patches.append(oval)
 
-        # Three blade circles spread across the deck width.
-        for k in range(N_BLADES):
-            # Offset of each blade centre from the deck centre, across-track.
-            off = (k - (N_BLADES - 1) / 2) * (DECK_WIDTH_M / N_BLADES)
-            bx, by = deck[0] + off * lx, deck[1] + off * ly
+        # Three blades: outer pair at ±18" across-track, centre blade on the
+        # centreline and 6" further forward.
+        for off_r, off_f in (
+            (-OUTER_BLADE_OFF_M, 0.0),
+            (0.0, CENTRE_BLADE_FWD_M),
+            (OUTER_BLADE_OFF_M, 0.0),
+        ):
+            bx = deck[0] + off_r * rx + off_f * fx
+            by = deck[1] + off_r * ry + off_f * fy
             blade = mpatches.Circle(
                 (bx, by), BLADE_RADIUS_M,
                 facecolor="#bbbbbb", edgecolor="#333333",
@@ -274,10 +294,10 @@ def view(path: Path) -> None:
             ax.add_patch(blade)
             live_patches.append(blade)
 
-        # Forward heading arrow from antenna centre.
+        # Forward heading arrow from the mower centre.
         arrow = mpatches.FancyArrowPatch(
-            posA=(ctr[0], ctr[1]),
-            posB=(ctr[0] + fx * ARROW_LEN_M, ctr[1] + fy * ARROW_LEN_M),
+            posA=(cen[0], cen[1]),
+            posB=(cen[0] + fx * ARROW_LEN_M, cen[1] + fy * ARROW_LEN_M),
             arrowstyle="-|>",
             color="black",
             mutation_scale=16,
@@ -291,7 +311,8 @@ def view(path: Path) -> None:
         r = rows[idx]
         vel = f"{float(r['velocity_kph']):.1f} km/h" if r["velocity_kph"] else "-- km/h"
         ax.set_title(
-            f"{path.name}   frame {idx + 1}/{n}   hdg {hdg:.1f}°   {vel}   {r['host_time'][:19]}"
+            f"{path.name}   frame {idx + 1}/{n}   hdg {hdg:.1f}° (fwd)   "
+            f"{vel}   {r['host_time'][:19]}"
         )
         fig.canvas.draw_idle()
 
@@ -305,11 +326,11 @@ def view(path: Path) -> None:
     # ── Legend ───────────────────────────────────────────────────────────────
     legend_elements = [
         mpatches.Patch(facecolor="#4caf50", alpha=0.5,
-                       label=f'Blade sweep ({54}"  /{DECK_WIDTH_M:.2f} m)'),
+                       label=f'Blade sweep (54" / {CUT_WIDTH_M:.2f} m)'),
         plt.Line2D([0], [0], color="red",   linewidth=2, label="Centre track"),
         plt.Line2D([0], [0], color="black", linewidth=2, label="Antenna baseline + heading"),
         mpatches.Patch(facecolor="#bbbbbb", edgecolor="#333333",
-                       label='Deck (3-blade oval, 54×14")'),
+                       label="Deck (3 blades, 54\" cut)"),
         plt.Line2D([0], [0], color="green", marker="o", linestyle="",
                    markersize=7, label="Start"),
         plt.Line2D([0], [0], color="red",   marker="s", linestyle="",
@@ -323,7 +344,7 @@ def view(path: Path) -> None:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 def main() -> None:
-    parser = argparse.ArgumentParser(description="View a watson_dms mowing run CSV.")
+    parser = argparse.ArgumentParser(description="View a mowing run CSV (LG580P or Watson).")
     parser.add_argument("csv", nargs="?", help="Path to CSV file (opens file dialog if omitted)")
     args = parser.parse_args()
 
@@ -336,7 +357,7 @@ def main() -> None:
             root = tk.Tk()
             root.withdraw()
             chosen = filedialog.askopenfilename(
-                title="Open watson_dms run CSV",
+                title="Open mowing run CSV",
                 filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
             )
             root.destroy()
