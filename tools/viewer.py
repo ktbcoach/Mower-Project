@@ -63,6 +63,18 @@ N_BLADES             = 3
 # Heading arrow length from the mower centre.
 ARROW_LEN_M = 24 * IN
 
+# Chassis footprint (top-down outline; mower body frame, relative to the blades).
+REAR_WHEEL_TRACK_M        = 33.5 * IN   # rear drive wheels, centre-to-centre
+REAR_WHEEL_WIDTH_M        = 8 * IN      # rear tyre width (across-track)
+REAR_WHEEL_DIA_M          = 18 * IN     # rear tyre diameter (fore-aft)
+REAR_AXLE_BEHIND_BLADES_M = 21 * IN     # rear wheels 21" behind the outer blades
+FRONT_TRACK_M             = 32 * IN     # front caster wheels, centre-to-centre
+FRONT_AHEAD_OF_REAR_M     = 48 * IN     # caster axle 48" ahead of the rear axle
+FRONT_WHEEL_WIDTH_M       = 5 * IN      # front caster tyre width (across-track)
+FRONT_WHEEL_DIA_M         = 12 * IN     # front caster tyre diameter (fore-aft)
+CHUTE_OUT_M               = 36 * IN     # discharge chute tip, right of centreline
+CHUTE_DEPTH_M             = 12 * IN     # chute fore-aft size (visual)
+
 
 # ── Geometry helpers ───────────────────────────────────────────────────────────
 def _lat_lon_to_en(lat: float, lon: float, lat0: float, lon0: float) -> tuple[float, float]:
@@ -258,6 +270,49 @@ def view(path: Path) -> None:
         fx, fy = _forward_unit(hdg)
         rx, ry = _right_unit(hdg)
 
+        # Body-frame → world helpers: (right of centreline, forward of antennas).
+        def bw(right_of_cl: float, fwd_of_ant: float) -> tuple[float, float]:
+            r = CENTERLINE_RIGHT_OF_GPS_M + right_of_cl
+            return (main[0] + r * rx + fwd_of_ant * fx,
+                    main[1] + r * ry + fwd_of_ant * fy)
+
+        def rect(right_of_cl, fwd_of_ant, across, alongf, **kw):
+            hw, hl = across / 2, alongf / 2
+            pts = [bw(right_of_cl - hw, fwd_of_ant - hl),
+                   bw(right_of_cl + hw, fwd_of_ant - hl),
+                   bw(right_of_cl + hw, fwd_of_ant + hl),
+                   bw(right_of_cl - hw, fwd_of_ant + hl)]
+            p = mpatches.Polygon(pts, closed=True, **kw)
+            ax.add_patch(p)
+            live_patches.append(p)
+
+        # ── Mower footprint (rear wheels, front casters, chute, chassis) ──────
+        rear_fwd  = BLADES_FWD_OF_GPS_M - REAR_AXLE_BEHIND_BLADES_M
+        front_fwd = rear_fwd + FRONT_AHEAD_OF_REAR_M
+        rtk = REAR_WHEEL_TRACK_M / 2
+        ftk = FRONT_TRACK_M / 2
+
+        # Faint chassis outline through the four wheel contact points.
+        foot = [bw(-rtk, rear_fwd), bw(-ftk, front_fwd),
+                bw(ftk, front_fwd), bw(rtk, rear_fwd)]
+        chassis = mpatches.Polygon(foot, closed=True, facecolor="#000000", alpha=0.05,
+                                   edgecolor="#888888", linewidth=1.0, linestyle="--",
+                                   zorder=2)
+        ax.add_patch(chassis)
+        live_patches.append(chassis)
+
+        # Rear drive wheels (dark), front casters (grey).
+        for s in (-1, 1):
+            rect(s * rtk, rear_fwd, REAR_WHEEL_WIDTH_M, REAR_WHEEL_DIA_M,
+                 facecolor="#222222", edgecolor="none", alpha=0.85, zorder=5)
+            rect(s * ftk, front_fwd, FRONT_WHEEL_WIDTH_M, FRONT_WHEEL_DIA_M,
+                 facecolor="#555555", edgecolor="none", alpha=0.85, zorder=5)
+
+        # Discharge chute: from the deck's right edge (27") out to 36" right.
+        chute_ctr = (HALF_CUT_M + CHUTE_OUT_M) / 2
+        rect(chute_ctr, BLADES_FWD_OF_GPS_M, CHUTE_OUT_M - HALF_CUT_M, CHUTE_DEPTH_M,
+             facecolor="#e69138", edgecolor="#7f5410", alpha=0.5, zorder=5)
+
         # Deck oval (3-blade housing): 54" wide (across-track) × ~24" deep,
         # nudged forward to enclose the leading centre blade. matplotlib measures
         # the ellipse angle CCW from +x (east); the width axis follows "right".
@@ -331,6 +386,8 @@ def view(path: Path) -> None:
         plt.Line2D([0], [0], color="black", linewidth=2, label="Antenna baseline + heading"),
         mpatches.Patch(facecolor="#bbbbbb", edgecolor="#333333",
                        label="Deck (3 blades, 54\" cut)"),
+        mpatches.Patch(facecolor="#222222", label="Wheels / chassis footprint"),
+        mpatches.Patch(facecolor="#e69138", alpha=0.6, label="Discharge chute (right)"),
         plt.Line2D([0], [0], color="green", marker="o", linestyle="",
                    markersize=7, label="Start"),
         plt.Line2D([0], [0], color="red",   marker="s", linestyle="",
