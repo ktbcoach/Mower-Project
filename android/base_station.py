@@ -46,12 +46,14 @@ from dataclasses import dataclass
 from typing import Optional
 
 # --- platform: Android USB host vs. desktop pyserial ---------------------------
+ON_ANDROID = False
+_IMPORT_ERR = ""
 try:
     from usb4a import usb            # noqa: F401  (present only on Android)
     from usbserial4a import serial4a  # noqa: F401
     ON_ANDROID = True
-except Exception:
-    ON_ANDROID = False
+except Exception as _e:  # not installed / not on Android
+    _IMPORT_ERR = str(_e) or _e.__class__.__name__
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "base_config.json")
 
@@ -368,11 +370,20 @@ class Bridge:
         port = None
         try:
             # Open the radio once; reused across NTRIP reconnects.
-            self._set(conn="opening USB radio")
+            self._set(conn="opening radio")
             try:
                 port, label = open_serial(self.cfg, self._stop)
             except PermissionPending:
-                self._set(conn="stopped", detail="USB permission not granted")
+                self._set(conn="stopped", error="USB permission not granted — tap Start again")
+                return
+            except Exception as exc:
+                # Surface the real reason instead of letting the thread die silently.
+                if not ON_ANDROID:
+                    hint = (f"usbserial4a not loaded ({_IMPORT_ERR or 'not installed'}); "
+                            f"install it in Pydroid, or set a valid serial_port on desktop")
+                    self._set(conn="stopped", error=f"{exc} — {hint}")
+                else:
+                    self._set(conn="stopped", error=f"USB radio open failed: {exc}")
                 return
             self._set(port_label=label, detail="radio open")
 
@@ -616,7 +627,7 @@ class Dashboard(BoxLayout):
                 self.banner.text = "LINK LOST"
                 self.banner_box.set_bg(FIX_NO)
         elif not snap["running"]:
-            self.banner.text = "IDLE"
+            self.banner.text = "START FAILED" if snap["error"] else "IDLE"
             self.banner_box.set_bg(FIX_NO)
         else:
             name = (st.fix_quality_name or "no fix").upper().replace("_", "-")
@@ -647,6 +658,10 @@ class Dashboard(BoxLayout):
 
         # Bridge status line: connection + bytes + RTCM types + USB radio.
         parts = [f"NTRIP: {snap['conn']}"]
+        if not snap["running"]:
+            # Platform indicator: on a phone this MUST read "Android USB"; if it
+            # reads "desktop pyserial", usbserial4a isn't installed in Pydroid.
+            parts.append("Android USB" if ON_ANDROID else "desktop pyserial")
         if snap["port_label"]:
             parts.append(f"radio {snap['port_label']}")
         if snap["total_bytes"]:
