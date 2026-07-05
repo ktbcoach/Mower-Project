@@ -27,3 +27,6 @@ scripts/ntrip-base.env
 # Rover telemetry status file (runtime state, written by the base bridge)
 rover-status.txt
 rover-status.txt.tmp
+
+# Android base station on-device config (holds NTRIP credentials)
+android/base_config.json
