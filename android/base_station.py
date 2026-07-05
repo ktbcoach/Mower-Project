@@ -666,6 +666,19 @@ class Dashboard(BoxLayout):
             self.footer.text = f"link {tag}   last {age:4.1f}s ago   seq {seq}"
 
 
+# Location presets for the Settings "quick fill" row. A VRS / network-RTK
+# mountpoint needs an approximate position (GGA); a single-base mountpoint does
+# not. The VRS mountpoint name matches docs/LG580P.md — confirm it against the
+# caster's sourcetable if unsure (e.g. start_base.ps1 -ListMountpoints).
+VRS_MOUNTPOINT = "VRS_RTCM3"
+LOCATION_PRESETS = [
+    # (button label, mountpoint, lat, lon)
+    ("Current (VRS)", VRS_MOUNTPOINT, "44.585979", "-71.947149"),
+    ("Perim site (VRS)", VRS_MOUNTPOINT, "44.420137", "-72.983771"),
+    ("Single-base", "VCAP_RTCM3", "", ""),
+]
+
+
 class SettingsPopup(Popup):
     FIELDS = [
         ("host", "NTRIP host", False), ("port", "NTRIP port", False),
@@ -679,6 +692,20 @@ class SettingsPopup(Popup):
     def __init__(self, cfg: dict, on_save, **kw):
         self._inputs: dict[str, TextInput] = {}
         body = BoxLayout(orientation="vertical", spacing=6, padding=6)
+
+        # Quick-fill presets: set the mountpoint + GGA position in one tap.
+        # VRS presets switch to the VRS mountpoint and fill lat/lon; the
+        # single-base preset reverts and clears the position (no GGA sent).
+        body.add_widget(Label(
+            text="Quick fill (mountpoint + position):", color=DIM, font_size="12sp",
+            halign="left", valign="middle", size_hint_y=None, height="22dp"))
+        preset_row = BoxLayout(size_hint_y=None, height="44dp", spacing=6)
+        for plabel, mp, plat, plon in LOCATION_PRESETS:
+            preset_row.add_widget(Button(
+                text=plabel, font_size="13sp",
+                on_release=lambda _b, m=mp, la=plat, lo=plon: self._apply_preset(m, la, lo)))
+        body.add_widget(preset_row)
+
         for key, label, secret in self.FIELDS:
             row = BoxLayout(size_hint_y=None, height="40dp", spacing=6)
             row.add_widget(Label(text=label, color=FG, font_size="13sp", size_hint_x=0.45,
@@ -695,6 +722,12 @@ class SettingsPopup(Popup):
         super().__init__(title="Base station settings", content=body,
                          size_hint=(0.95, 0.95), **kw)
         self._on_save = on_save
+
+    def _apply_preset(self, mountpoint, lat, lon):
+        """Fill the mountpoint + position fields from a preset (still needs Save)."""
+        self._inputs["mountpoint"].text = mountpoint
+        self._inputs["lat"].text = lat
+        self._inputs["lon"].text = lon
 
     def _save(self, *_a):
         out = {}

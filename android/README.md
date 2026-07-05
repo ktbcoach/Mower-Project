@@ -60,6 +60,19 @@ A single-base mountpoint (e.g. `VCAP_RTCM3`) needs no position. For a **VRS /
 network-RTK** mountpoint, set both **lat** and **lon** (decimal degrees) in
 Settings — the app then sends a periodic GGA so the caster knows where you are.
 
+**Quick-fill presets.** The Settings screen has a "Quick fill" row that sets the
+mountpoint + position in one tap:
+
+| Preset | Mountpoint | Position |
+|--------|-----------|----------|
+| **Current (VRS)** | `VRS_RTCM3` | 44.585979, −71.947149 |
+| **Perim site (VRS)** | `VRS_RTCM3` | 44.420137, −72.983771 |
+| **Single-base** | `VCAP_RTCM3` | (cleared — no GGA) |
+
+Tap a preset, then **Save**. The VRS mountpoint name (`VRS_RTCM3`) matches the
+docs; if the caster rejects it, list the real mountpoints and edit the field —
+on the Windows box run `start_base.ps1 -ListMountpoints`.
+
 ## Develop/test on the Windows box first
 
 The same file runs on desktop with **`pip install kivy pyserial`**. On desktop it
