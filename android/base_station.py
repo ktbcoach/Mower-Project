@@ -475,6 +475,7 @@ from kivy.uix.button import Button                       # noqa: E402
 from kivy.uix.gridlayout import GridLayout               # noqa: E402
 from kivy.uix.label import Label                         # noqa: E402
 from kivy.uix.popup import Popup                         # noqa: E402
+from kivy.metrics import dp                              # noqa: E402
 from kivy.uix.textinput import TextInput                 # noqa: E402
 
 
@@ -553,11 +554,24 @@ class Dashboard(BoxLayout):
         self.banner_box.add_widget(self.banner)
         self.add_widget(self.banner_box)
 
-        # Bridge status line.
+        # Diagnostics card (its own field, below the banner): a compact
+        # connection line plus a dedicated message field that WRAPS and grows
+        # with its text, so long errors are fully readable and never clipped
+        # behind the banner.
+        diag_card = BGBox(CARD, orientation="vertical", size_hint_y=None,
+                          padding=(10, 6), spacing=2)
         self.bridge_line = Label(text="", color=DIM, font_size="13sp", halign="left",
-                                 valign="middle", size_hint_y=None, height="24dp")
-        self.bridge_line.bind(size=lambda w, *_: setattr(w, "text_size", w.size))
-        self.add_widget(self.bridge_line)
+                                 valign="middle", size_hint_y=None, height=dp(22))
+        self.bridge_line.bind(width=lambda w, *_: setattr(w, "text_size", (w.width, None)))
+        self.diag = Label(text="", color=DIM, font_size="15sp", halign="left",
+                          valign="top", size_hint_y=None, height=dp(20))
+        self.diag.bind(
+            width=lambda w, *_: setattr(w, "text_size", (w.width, None)),
+            texture_size=lambda w, ts: setattr(w, "height", ts[1]))
+        diag_card.add_widget(self.bridge_line)
+        diag_card.add_widget(self.diag)
+        diag_card.bind(minimum_height=diag_card.setter("height"))
+        self.add_widget(diag_card)
 
         # Value grid (same cells/order as tools/rover_display.py).
         grid = GridLayout(cols=2, spacing=6)
@@ -656,21 +670,32 @@ class Dashboard(BoxLayout):
         self.cells["log"].set("--" if s.logging is None else ("LOGGING" if s.logging else "idle"),
                               GREEN if s.logging else FG)
 
-        # Bridge status line: connection + bytes + RTCM types + USB radio.
+        # Compact connection line: state + platform + bytes + RTCM types + radio.
         parts = [f"NTRIP: {snap['conn']}"]
-        if not snap["running"]:
-            # Platform indicator: on a phone this MUST read "Android USB"; if it
-            # reads "desktop pyserial", usbserial4a isn't installed in Pydroid.
-            parts.append("Android USB" if ON_ANDROID else "desktop pyserial")
+        # Platform indicator: on a phone this MUST read "Android USB"; if it
+        # reads "desktop pyserial", usbserial4a isn't installed in Pydroid.
+        parts.append("Android USB" if ON_ANDROID else "desktop pyserial")
         if snap["port_label"]:
             parts.append(f"radio {snap['port_label']}")
         if snap["total_bytes"]:
             parts.append(f"{snap['total_bytes']} B")
         if snap["rtcm"]:
             parts.append(f"RTCM {snap['rtcm']}")
-        if snap["error"]:
-            parts.append(f"! {snap['error']}")
         self.bridge_line.text = "   ".join(parts)
+
+        # Dedicated diagnostics field: full message, wraps, colour-coded.
+        if snap["error"]:
+            self.diag.text = snap["error"]
+            self.diag.color = rgba("#e74c3c")            # red — something failed
+        elif not ON_ANDROID:
+            self.diag.text = ("usbserial4a not loaded — install it in Pydroid "
+                              "(Menu > Pip) and restart the app.")
+            self.diag.color = rgba("#f1c40f")            # amber — setup needed
+        elif not snap["running"]:
+            self.diag.text = "Ready. Set NTRIP user/password in Settings, then Start."
+            self.diag.color = DIM
+        else:
+            self.diag.text = ""
 
         # Footer: link health.
         if age is None:
