@@ -409,6 +409,62 @@ def ntrip_connect(cfg: dict) -> socket.socket:
     return sock
 
 
+class WakeLock:
+    """Keep the bridge alive while the screen is off.
+
+    Android suspends the Python process on screen-off, which silently kills the
+    NTRIP socket and the whole bridge — the disconnect seen in the field. A
+    PARTIAL_WAKE_LOCK keeps the CPU running (the screen still sleeps normally),
+    and a high-perf Wi-Fi lock stops the radio from being powered down under it.
+    Both are best-effort: if the platform/permission isn't available they no-op
+    rather than blocking the bridge. Needs the WAKE_LOCK permission (Pydroid
+    holds it); harmless on desktop.
+    """
+
+    def __init__(self):
+        self._cpu = None
+        self._wifi = None
+
+    def acquire(self):
+        if not ON_ANDROID:
+            return
+        try:
+            from jnius import autoclass
+            context = usb.get_context()
+            if self._cpu is None:
+                PowerManager = autoclass("android.os.PowerManager")
+                pm = context.getSystemService("power")
+                lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "gpsbase:bridge")
+                lock.setReferenceCounted(False)
+                lock.acquire()
+                self._cpu = lock
+        except Exception:
+            self._cpu = None
+        try:
+            from jnius import autoclass
+            context = usb.get_context()
+            if self._wifi is None:
+                WifiManager = autoclass("android.net.wifi.WifiManager")
+                wm = context.getSystemService("wifi")
+                lock = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                                         "gpsbase:wifi")
+                lock.setReferenceCounted(False)
+                lock.acquire()
+                self._wifi = lock
+        except Exception:
+            self._wifi = None
+
+    def release(self):
+        for attr in ("_cpu", "_wifi"):
+            lock = getattr(self, attr)
+            setattr(self, attr, None)
+            if lock is not None:
+                try:
+                    lock.release()
+                except Exception:
+                    pass
+
+
 # ==============================================================================
 # Bridge worker — one background thread does socket + serial (no port locking).
 # ==============================================================================
@@ -435,6 +491,7 @@ class Bridge:
         self.telem_bytes = 0
         self.last_raw = ""
         self._telem_buf = bytearray()
+        self._wake = WakeLock()
 
     @property
     def running(self) -> bool:
@@ -516,6 +573,7 @@ class Bridge:
 
     def _run(self):
         port = None
+        self._wake.acquire()  # keep running with the screen off
         try:
             # Open the radio once; reused across NTRIP reconnects.
             self._set(conn="opening radio")
@@ -615,6 +673,7 @@ class Bridge:
                     port.close()
                 except Exception:
                     pass
+            self._wake.release()
             self._set(conn="stopped")
 
 

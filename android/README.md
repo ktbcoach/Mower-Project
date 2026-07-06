@@ -54,6 +54,11 @@ credentials — keep it on the device, don't commit it (it's gitignored).
   by signal), HDOP, lat/lon, heading, speed, corrections, logging.
 - **Stop** cleanly closes the caster socket and the USB port.
 
+While the bridge runs it holds a wake lock so it keeps streaming with the
+**screen off** (the screen still sleeps normally); it's released on Stop. For
+long unattended runs also exclude Pydroid from battery optimisation: Android
+Settings > Apps > Pydroid 3 > Battery > Unrestricted.
+
 ## VRS / network-RTK mountpoints
 
 A single-base mountpoint (e.g. `VCAP_RTCM3`) needs no position. For a **VRS /
