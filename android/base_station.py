@@ -229,6 +229,11 @@ class PermissionPending(Exception):
     """Raised while the Android USB-permission dialog is outstanding."""
 
 
+class SerialGone(Exception):
+    """Raised when the serial port stops accepting writes — distinct from a
+    transient NTRIP hiccup, since retrying the caster can't fix a dead port."""
+
+
 def open_serial(cfg: dict, stop: threading.Event):
     """Open the base radio. Android: first USB device via usb4a (waits for the
     permission grant). Desktop: pyserial on cfg['serial_port']. Returns
@@ -369,15 +374,22 @@ class Bridge:
                     self._set(status=st, status_ts=time.time())
 
     def _drain_telemetry(self, port):
+        # NOTE: usbserial4a's CdcAcmSerial silently no-ops open() (leaving
+        # is_open False, no exception) if USB permission wasn't fully settled
+        # yet, and in_waiting/read() then raise PortNotOpenError. Surface that
+        # instead of treating it as "0 bytes, must be a wiring problem" — those
+        # are very different failures to chase.
         try:
             n = getattr(port, "in_waiting", 0) or 0
-        except Exception:
-            n = 0
+        except Exception as exc:
+            self._set(error=f"serial read failed: {exc}")
+            return
         if n:
             try:
                 data = port.read(n)
-            except Exception:
-                data = b""
+            except Exception as exc:
+                self._set(error=f"serial read failed: {exc}")
+                return
             if data:
                 self._feed_telemetry(data)
 
@@ -399,6 +411,19 @@ class Bridge:
                     self._set(conn="stopped", error=f"{exc} — {hint}")
                 else:
                     self._set(conn="stopped", error=f"USB radio open failed: {exc}")
+                return
+            # usbserial4a can return a port whose open() silently no-op'd
+            # (permission not fully settled at construction time) — is_open
+            # stays False with no exception raised. Catch that here instead of
+            # every read/write downstream failing mysteriously.
+            if not getattr(port, "is_open", True):
+                self._set(conn="stopped",
+                          error="USB port did not actually open (permission race) — "
+                                "unplug/replug the adapter, or Stop and Start again")
+                try:
+                    port.close()
+                except Exception:
+                    pass
                 return
             self._set(port_label=label, detail="radio open")
 
@@ -423,7 +448,12 @@ class Bridge:
                             data = sock.recv(1024)
                             if not data:
                                 raise ConnectionError("stream ended")
-                            port.write(data)
+                            # CdcAcmSerial.write() returns None (no exception)
+                            # if the port silently isn't open — don't let that
+                            # pass for a successful write.
+                            wrote = port.write(data)
+                            if wrote is None:
+                                raise SerialGone("serial write returned None — port not open")
                             scanner.feed(data)
                             total += len(data)
                             self._set(total_bytes=total, rtcm=scanner.summary())
@@ -439,6 +469,12 @@ class Bridge:
                         sock.close()
                     except Exception:
                         pass
+                except SerialGone as exc:
+                    # The port itself is dead — reconnecting to the caster
+                    # can't fix that, so stop cleanly instead of looping.
+                    self._set(conn="stopped",
+                              error=f"{exc} — unplug/replug the adapter, then Start again")
+                    return
                 except Exception as exc:
                     if self._stop.is_set():
                         break
