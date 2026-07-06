@@ -225,6 +225,86 @@ class RtcmScanner:
         return "  ".join(f"{m}:{n}" for m, n in sorted(self.counts.items()))
 
 
+if ON_ANDROID:
+    from usbserial4a.pl2303serial4a import Pl2303Serial
+
+    class Pl2303FixedSerial(Pl2303Serial):
+        """PL2303 driver with HXN-generation support (PL2303GC/GT/GL/GE/GS).
+
+        usbserial4a's Pl2303Serial only speaks the legacy protocol: its init
+        sequence and vendor register writes use request code 0x01, which the
+        newer HXN silicon (still VID:PID 067b:2303) rejects — and the driver
+        never checks the return codes, so the UART is left unconfigured while
+        bulk writes are happily USB-acked into the chip buffer and never
+        transmitted. HXN uses vendor requests 0x80 (write) / 0x81 (read) and a
+        different register map. Detection probe + register values ported from
+        usb-serial-for-android's ProlificSerialDriver and Linux pl2303.c.
+        """
+
+        VENDOR_READ_HXN_REQUEST = 0x81
+        VENDOR_WRITE_HXN_REQUEST = 0x80
+        RESET_HXN_REQUEST = 0x07     # value = reset register; index = pipes
+        RESET_HXN_RX_PIPE = 0x01
+        RESET_HXN_TX_PIPE = 0x02
+        HXN_FLOWCTRL_REG = 0x0A
+        HXN_FLOWCTRL_NONE = 0xFF     # usb-serial-for-android FlowControl.NONE
+
+        def __init__(self, *args, **kwargs):
+            # Must exist before super().__init__ — open() runs during
+            # construction and our overrides consult it.
+            self.hxn = False
+            super(Pl2303FixedSerial, self).__init__(*args, **kwargs)
+
+        def _vendor_out(self, value, index, buf=None):
+            request = (self.VENDOR_WRITE_HXN_REQUEST if self.hxn
+                       else self.PROLIFIC_VENDOR_WRITE_REQUEST)
+            return self._connection.controlTransfer(
+                self.PROLIFIC_VENDOR_OUT_REQTYPE, request, value, index,
+                buf, (0 if buf is None else len(buf)),
+                self.USB_WRITE_TIMEOUT_MILLIS)
+
+        def _vendor_in(self, value, index, buf=None):
+            request = (self.VENDOR_READ_HXN_REQUEST if self.hxn
+                       else self.PROLIFIC_VENDOR_READ_REQUEST)
+            return self._connection.controlTransfer(
+                self.PROLIFIC_VENDOR_IN_REQTYPE, request, value, index,
+                buf, (0 if buf is None else len(buf)),
+                self.USB_READ_TIMEOUT_MILLIS)
+
+        def _init_device(self):
+            # HXN probe (= usb-serial-for-android testHxStatus): legacy chips
+            # answer a vendor read of register 0x8080; HXN stalls it, which
+            # usb4a reports as a negative controlTransfer result.
+            buf = bytearray(1)
+            res = self._connection.controlTransfer(
+                self.PROLIFIC_VENDOR_IN_REQTYPE,
+                self.PROLIFIC_VENDOR_READ_REQUEST,
+                0x8080, 0, buf, 1, self.USB_READ_TIMEOUT_MILLIS)
+            self.hxn = res < 0
+            if self.hxn:
+                # Reset both pipes, then hardware flow control OFF — an HXN
+                # left with flow control enabled gates TX on a floating CTS,
+                # which buffers writes forever without transmitting.
+                self._vendor_out(self.RESET_HXN_REQUEST,
+                                 self.RESET_HXN_RX_PIPE | self.RESET_HXN_TX_PIPE)
+                self._vendor_out(self.HXN_FLOWCTRL_REG, self.HXN_FLOWCTRL_NONE)
+            else:
+                super(Pl2303FixedSerial, self)._init_device()
+
+        def _purgeHwBuffers(self, purgeReadBuffers, purgeWriteBuffers):
+            if not self.hxn:
+                return super(Pl2303FixedSerial, self)._purgeHwBuffers(
+                    purgeReadBuffers, purgeWriteBuffers)
+            index = 0
+            if purgeReadBuffers:
+                index |= self.RESET_HXN_RX_PIPE
+            if purgeWriteBuffers:
+                index |= self.RESET_HXN_TX_PIPE
+            if index:
+                self._vendor_out(self.RESET_HXN_REQUEST, index)
+            return True
+
+
 class PermissionPending(Exception):
     """Raised while the Android USB-permission dialog is outstanding."""
 
@@ -252,7 +332,12 @@ def open_serial(cfg: dict, stop: threading.Event):
                 time.sleep(0.4)
             if stop.is_set():
                 raise PermissionPending(name)
-        port = serial4a.get_serial_port(name, baud, 8, "N", 1)
+        if dev.getVendorId() == 0x067B:
+            # Prolific: use our HXN-aware driver — usbserial4a's own PL2303
+            # driver silently fails to configure HXN-generation chips.
+            port = Pl2303FixedSerial(name, baud, 8, "N", 1)
+        else:
+            port = serial4a.get_serial_port(name, baud, 8, "N", 1)
         # Some adapters gate their TX/status on the modem-control lines; assert
         # them like a desktop terminal program would.
         try:
@@ -271,6 +356,8 @@ def open_serial(cfg: dict, stop: threading.Event):
         try:
             vid, pid = dev.getVendorId(), dev.getProductId()
             drv = type(port).__name__
+            if getattr(port, "hxn", False):
+                drv += "/HXN"
             label = f"{label} [{drv} {vid:04x}:{pid:04x}]"
         except Exception:
             pass

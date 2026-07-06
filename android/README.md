@@ -87,6 +87,11 @@ box and verify end-to-end before moving to the phone.
 - **Permission dialog never appears / bridge won't open** — unplug/replug the
   adapter, tap Start again. `usbserial4a` supports FTDI, CP210x, CH34x, PL2303,
   and CDC-ACM chips; an exotic chip may be unsupported.
+- **Writes acked but no traffic on the radio (PL2303)** — newer Prolific "HXN"
+  chips (PL2303GC/GT/GL, still `067b:2303`) reject the legacy init sequence
+  usbserial4a sends, leaving the UART unconfigured while writes are silently
+  swallowed. The app ships its own HXN-aware PL2303 driver; the radio label
+  shows `Pl2303FixedSerial/HXN` when the fix is active.
 - **Caster rejected / no bytes** — check user/password and that the mountpoint
   exists and is RTCM 3.x (not CMRx). Confirm Wi-Fi/cellular is up.
 - **App won't launch in Pydroid** — make sure `kivy` finished installing (first
