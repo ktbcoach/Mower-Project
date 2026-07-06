@@ -92,6 +92,13 @@ box and verify end-to-end before moving to the phone.
   usbserial4a sends, leaving the UART unconfigured while writes are silently
   swallowed. The app ships its own HXN-aware PL2303 driver; the radio label
   shows `Pl2303FixedSerial/HXN` when the fix is active.
+- **Multi-port adapter (writes acked, both directions dead)** — a 4-port
+  adapter is an internal hub with one serial chip per jack, so Android sees
+  several identical USB devices and the app may open a chip whose jack is
+  empty. The radio label shows the pick as `dev K/N`; change **USB device #**
+  in Settings (0..N-1, Stop/Start between tries) until the radio LEDs blink.
+  A paperclip loopback across DB9 pins 2-3 on the target jack also works:
+  the right index makes `in` count up in step with `out`.
 - **Caster rejected / no bytes** — check user/password and that the mountpoint
   exists and is RTCM 3.x (not CMRx). Confirm Wi-Fi/cellular is up.
 - **App won't launch in Pydroid** — make sure `kivy` finished installing (first

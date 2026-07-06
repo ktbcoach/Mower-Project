@@ -64,7 +64,9 @@ DEFAULTS = {
     "user": "",
     "password": "",
     "serial_baud": 19200,
-    "serial_port": "COM3",   # desktop only; Android auto-picks the USB device
+    "serial_port": "COM3",   # desktop only
+    "usb_index": 0,          # Android: which USB device (multi-port adapters
+                             # like a 4-port SIIG show up as one device per jack)
     "lat": "",               # set BOTH lat+lon for VRS / network-RTK mountpoints
     "lon": "",
     "gga_interval": 10.0,
@@ -323,7 +325,19 @@ def open_serial(cfg: dict, stop: threading.Event):
         devices = usb.get_usb_device_list()
         if not devices:
             raise IOError("no USB device found — check the OTG cable/adapter")
-        dev = devices[0]
+        # Multi-port adapters (e.g. 4-port SIIG = internal hub + one PL2303 per
+        # jack) enumerate as several identical USB devices; blindly taking the
+        # first can open a chip whose jack has nothing plugged into it. Sort
+        # for a stable order and let usb_index choose.
+        devices = sorted(devices, key=lambda d: d.getDeviceName())
+        try:
+            idx = int(cfg.get("usb_index", 0) or 0)
+        except (TypeError, ValueError):
+            idx = 0
+        if not 0 <= idx < len(devices):
+            raise IOError(
+                f"usb_index {idx} out of range — {len(devices)} USB device(s) attached")
+        dev = devices[idx]
         name = dev.getDeviceName()
         if not usb.has_usb_permission(dev):
             usb.request_usb_permission(dev)
@@ -361,6 +375,8 @@ def open_serial(cfg: dict, stop: threading.Event):
             label = f"{label} [{drv} {vid:04x}:{pid:04x}]"
         except Exception:
             pass
+        # Make the pick visible: "dev 2/4" = usb_index 1 of 4 attached devices.
+        label = f"dev {idx + 1}/{len(devices)} {label}"
         return port, f"{label} @ {baud}"
     else:
         import serial
@@ -901,6 +917,7 @@ class SettingsPopup(Popup):
         ("mountpoint", "Mountpoint (RTCM 3.x)", False),
         ("user", "NTRIP user", False), ("password", "NTRIP password", True),
         ("serial_baud", "Radio baud", False),
+        ("usb_index", "USB device # (multi-port adapter: 0..N-1)", False),
         ("serial_port", "Serial port (desktop COMx; ignored on Android)", False),
         ("lat", "GGA lat (VRS only)", False), ("lon", "GGA lon (VRS only)", False),
     ]
@@ -949,7 +966,7 @@ class SettingsPopup(Popup):
         out = {}
         for key, _label, _secret in self.FIELDS:
             val = self._inputs[key].text.strip()
-            if key in ("port",):
+            if key in ("port", "usb_index"):
                 try:
                     val = int(val)
                 except ValueError:
