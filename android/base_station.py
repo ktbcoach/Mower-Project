@@ -253,10 +253,27 @@ def open_serial(cfg: dict, stop: threading.Event):
             if stop.is_set():
                 raise PermissionPending(name)
         port = serial4a.get_serial_port(name, baud, 8, "N", 1)
+        # Some adapters gate their TX/status on the modem-control lines; assert
+        # them like a desktop terminal program would.
+        try:
+            port.dtr = True
+            port.rts = True
+        except Exception:
+            pass
         try:
             label = dev.getProductName() or name
         except Exception:
             label = name
+        # Surface the driver class + VID:PID — usbserial4a picks the driver by
+        # vendor id, and an unrecognized (e.g. clone) chip silently falls back
+        # to the generic CDC-ACM driver, whose writes can "succeed" without
+        # reaching the UART. The label makes a wrong pick visible in the UI.
+        try:
+            vid, pid = dev.getVendorId(), dev.getProductId()
+            drv = type(port).__name__
+            label = f"{label} [{drv} {vid:04x}:{pid:04x}]"
+        except Exception:
+            pass
         return port, f"{label} @ {baud}"
     else:
         import serial
@@ -305,6 +322,7 @@ class Bridge:
         self.error = ""
         self.port_label = ""
         self.total_bytes = 0
+        self.acked_bytes = 0  # sum of write() return values — what USB acked
         self.rtcm = ""
         self.status: Optional[RoverStatus] = None
         self.status_ts = 0.0
@@ -325,7 +343,7 @@ class Bridge:
                 "conn": self.conn, "detail": self.detail, "error": self.error,
                 "port_label": self.port_label, "total_bytes": self.total_bytes,
                 "rtcm": self.rtcm, "status": self.status, "status_ts": self.status_ts,
-                "running": self.running,
+                "running": self.running, "acked_bytes": self.acked_bytes,
                 "telem_bytes": self.telem_bytes, "last_raw": self.last_raw,
             }
 
@@ -342,7 +360,7 @@ class Bridge:
         with self.lock:
             self.conn, self.error, self.total_bytes, self.rtcm = "starting", "", 0, ""
             self.status, self.status_ts = None, 0.0
-            self.telem_bytes, self.last_raw = 0, ""
+            self.telem_bytes, self.last_raw, self.acked_bytes = 0, "", 0
         self._thread = threading.Thread(target=self._run, name="bridge", daemon=True)
         self._thread.start()
 
@@ -456,7 +474,10 @@ class Bridge:
                                 raise SerialGone("serial write returned None — port not open")
                             scanner.feed(data)
                             total += len(data)
-                            self._set(total_bytes=total, rtcm=scanner.summary())
+                            with self.lock:
+                                self.total_bytes = total
+                                self.rtcm = scanner.summary()
+                                self.acked_bytes += int(wrote or 0)
                         except socket.timeout:
                             pass  # no RTCM this second — fall through to telemetry
                         # Full-duplex: drain the rover's $PRSTAT from the radio.
@@ -729,7 +750,9 @@ class Dashboard(BoxLayout):
         if snap["port_label"]:
             parts.append(f"radio {snap['port_label']}")
         if snap["total_bytes"]:
-            parts.append(f"out {snap['total_bytes']} B")
+            # caster->app bytes vs. what the USB stack acknowledged writing —
+            # a big gap means RTCM is not actually reaching the radio.
+            parts.append(f"out {snap['total_bytes']} B (ack {snap['acked_bytes']})")
         if snap["rtcm"]:
             parts.append(f"RTCM {snap['rtcm']}")
         if snap["telem_bytes"]:
