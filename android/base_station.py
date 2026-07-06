@@ -303,6 +303,11 @@ class Bridge:
         self.rtcm = ""
         self.status: Optional[RoverStatus] = None
         self.status_ts = 0.0
+        # Debug visibility into the inbound (rover -> base) side, independent of
+        # whether a line ever parses as $PRSTAT — lets a stalled link be told
+        # apart from a framing/checksum problem.
+        self.telem_bytes = 0
+        self.last_raw = ""
         self._telem_buf = bytearray()
 
     @property
@@ -316,6 +321,7 @@ class Bridge:
                 "port_label": self.port_label, "total_bytes": self.total_bytes,
                 "rtcm": self.rtcm, "status": self.status, "status_ts": self.status_ts,
                 "running": self.running,
+                "telem_bytes": self.telem_bytes, "last_raw": self.last_raw,
             }
 
     def _set(self, **kw):
@@ -331,6 +337,7 @@ class Bridge:
         with self.lock:
             self.conn, self.error, self.total_bytes, self.rtcm = "starting", "", 0, ""
             self.status, self.status_ts = None, 0.0
+            self.telem_bytes, self.last_raw = 0, ""
         self._thread = threading.Thread(target=self._run, name="bridge", daemon=True)
         self._thread.start()
 
@@ -339,6 +346,8 @@ class Bridge:
 
     # -- internals --
     def _feed_telemetry(self, data: bytes):
+        with self.lock:
+            self.telem_bytes += len(data)
         self._telem_buf.extend(data)
         while True:
             nl = self._telem_buf.find(b"\n")
@@ -348,6 +357,12 @@ class Bridge:
                 return
             line = bytes(self._telem_buf[:nl]).decode("ascii", "replace").strip()
             del self._telem_buf[: nl + 1]
+            if not line:
+                continue
+            # Record the last raw line even if it isn't $PRSTAT / fails its
+            # checksum — tells a framing/corruption problem apart from "no
+            # bytes arriving at all".
+            self._set(last_raw=line[:96])
             if line.startswith("$PRSTAT"):
                 st = parse_status_sentence(line)
                 if st is not None:
@@ -678,9 +693,11 @@ class Dashboard(BoxLayout):
         if snap["port_label"]:
             parts.append(f"radio {snap['port_label']}")
         if snap["total_bytes"]:
-            parts.append(f"{snap['total_bytes']} B")
+            parts.append(f"out {snap['total_bytes']} B")
         if snap["rtcm"]:
             parts.append(f"RTCM {snap['rtcm']}")
+        if snap["telem_bytes"]:
+            parts.append(f"in {snap['telem_bytes']} B")
         self.bridge_line.text = "   ".join(parts)
 
         # Dedicated diagnostics field: full message, wraps, colour-coded.
@@ -694,8 +711,21 @@ class Dashboard(BoxLayout):
         elif not snap["running"]:
             self.diag.text = "Ready. Set NTRIP user/password in Settings, then Start."
             self.diag.color = DIM
-        else:
+        elif live:
             self.diag.text = ""
+        elif snap["telem_bytes"] == 0:
+            self.diag.text = ("No bytes from rover yet on this radio port — check the "
+                              "rover's RS232 TX/DOUT wiring, or RTCM may be starving the "
+                              "half-duplex return link.")
+            self.diag.color = rgba("#f1c40f")
+        elif st is None:
+            self.diag.text = (f"{snap['telem_bytes']} B received but no valid $PRSTAT yet. "
+                              f"Last line: {snap['last_raw']!r}")
+            self.diag.color = rgba("#f1c40f")
+        else:
+            self.diag.text = (f"Telemetry seen before but now stale ({age:.1f}s) — "
+                              f"RTCM traffic may be starving the half-duplex return link.")
+            self.diag.color = rgba("#f1c40f")
 
         # Footer: link health.
         if age is None:
