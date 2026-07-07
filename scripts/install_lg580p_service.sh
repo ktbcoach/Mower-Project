@@ -39,6 +39,16 @@ if [[ -n "$RTCM_SOURCE" ]]; then
 else
   RTCM_ARGS=""
 fi
+# Rover -> base $PRSTAT fix-status telemetry over the same radio (needs
+# RTCM_SOURCE). Defaults ON so you can verify fix quality on the base display
+# before collecting; set TELEMETRY=0 to disable.
+TELEMETRY="${TELEMETRY:-1}"
+TELEMETRY_INTERVAL="${TELEMETRY_INTERVAL:-1.0}"
+if [[ -n "$RTCM_SOURCE" && "$TELEMETRY" != "0" ]]; then
+  TELEMETRY_ARGS="--telemetry --telemetry-interval ${TELEMETRY_INTERVAL}"
+else
+  TELEMETRY_ARGS=""
+fi
 
 # LSM6DSO IMU + EKF tuning. Defaults match `lg580p fuse`'s own defaults (this
 # rover's mounting: lateral antenna baseline, body-aligned IMU) — override only
@@ -63,7 +73,11 @@ echo "  port/baud=$PORT @ $BAUD  HAT stack=$HAT_STACK"
 echo "  GPS LED=$GPS_LED  logging LED=$LOGGING_LED  contact ch=$CONTACT_CH"
 echo "  IMU bus=$IMU_BUS cs=$IMU_CS odr=${IMU_ODR}Hz  axis-remap=$AXIS_REMAP  lever-arm=$LEVER_ARM"
 echo "  heading-offset=$HEADING_OFFSET  rate=${RATE}Hz  coast-max=${COAST_MAX}s  float-scale=$FLOAT_SCALE"
-[[ -n "$RTCM_ARGS" ]] && echo "  RTCM=$RTCM_SOURCE @ $RTCM_BAUD"
+if [[ -n "$RTCM_ARGS" ]]; then
+  echo "  RTCM=$RTCM_SOURCE @ $RTCM_BAUD  telemetry=$([[ -n "$TELEMETRY_ARGS" ]] && echo "on (${TELEMETRY_INTERVAL}s)" || echo off)"
+elif [[ "$TELEMETRY" != "0" ]]; then
+  echo "  telemetry: OFF (needs RTCM_SOURCE to share the radio with the base)"
+fi
 
 sed \
   -e "s#__USER__#${RUN_USER}#g" \
@@ -86,6 +100,7 @@ sed \
   -e "s#__GYRO_CAL__#${GYRO_CAL}#g" \
   -e "s#__FLOAT_SCALE__#${FLOAT_SCALE}#g" \
   -e "s#__RTCM_ARGS__#${RTCM_ARGS}#g" \
+  -e "s#__TELEMETRY_ARGS__#${TELEMETRY_ARGS}#g" \
   "$TEMPLATE" > "$TARGET"
 
 mkdir -p "$APPDIR/logs"
@@ -104,5 +119,5 @@ echo
 echo "NOTE: lg580p and the Watson service both read a serial port and the HAT —"
 echo "run only one at a time. Disable the other: sudo systemctl disable --now watson-dms"
 echo
-echo "NOTE: rover -> base \$PRSTAT telemetry (--telemetry) isn't wired into the"
-echo "fusion pipeline yet; it's only available via 'lg580p collect --switch'."
+echo "TIP: with RTCM_SOURCE set, \$PRSTAT fix-status telemetry streams to the base"
+echo "so you can confirm RTK-fixed on the base display before flipping the switch."

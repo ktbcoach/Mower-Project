@@ -136,6 +136,18 @@ sudo bash scripts/install_lg580p_service.sh   # if you want this at boot instead
 Only run one of `collect --switch` / `fuse --switch` at a time — both grab the
 serial port and the HAT.
 
+**Base-station telemetry.** Add `--telemetry` (needs `--rtcm-source`, shares the
+correction radio) to stream `$PRSTAT` **raw GNSS fix status** back to the base
+display. It flows continuously — including while the switch is OFF — so you can
+confirm **RTK-fixed** on the base before flipping the switch to collect. The
+telemetry carries the receiver's own fix quality (not the fused solution), which
+is what you want for judging correction health. The `logging` flag in the frame
+tells the base whether a file is currently being written.
+
+```bash
+python -m lg580p fuse --switch --rtcm-source /dev/ttyAMA5 --telemetry
+```
+
 ### Verifying without RTK corrections (standalone GPS)
 
 `fuse` needs no `--rtcm-source` to run — the terminal status line is the

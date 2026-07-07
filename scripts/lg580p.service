@@ -17,7 +17,7 @@ ExecStart=__PYTHON__ -m lg580p fuse --switch \
   --axis-remap __AXIS_REMAP__ --lever-arm __LEVER_ARM__ \
   --heading-offset __HEADING_OFFSET__ \
   --rate __RATE__ --coast-max __COAST_MAX__ --gyro-cal __GYRO_CAL__ \
-  --float-scale __FLOAT_SCALE__ __RTCM_ARGS__ \
+  --float-scale __FLOAT_SCALE__ __RTCM_ARGS__ __TELEMETRY_ARGS__ \
   --log-dir __APPDIR__/logs --quiet
 Restart=always
 RestartSec=3

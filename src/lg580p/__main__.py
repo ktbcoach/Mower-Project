@@ -131,6 +131,7 @@ def cmd_fuse(args: argparse.Namespace) -> int:
                 heading_offset_deg=args.heading_offset,
                 config=cfg, policy=pol,
                 rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud,
+                telemetry=args.telemetry, telemetry_interval=args.telemetry_interval,
                 quiet=args.quiet,
             )
         except (RuntimeError, TimeoutError) as exc:
@@ -149,6 +150,7 @@ def cmd_fuse(args: argparse.Namespace) -> int:
              heading_offset_deg=args.heading_offset,
              config=cfg, policy=pol,
              rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud,
+             telemetry=args.telemetry, telemetry_interval=args.telemetry_interval,
              quiet=args.quiet)
     except (RuntimeError, TimeoutError) as exc:
         print(f"\n# {exc}", file=sys.stderr)
@@ -304,6 +306,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="serial port of the RTCM correction radio (forwarded to the LG580P)")
     fu.add_argument("--rtcm-baud", type=int, default=57600,
                     help="baud of the RTCM correction radio (default: 57600)")
+    fu.add_argument("--telemetry", action="store_true",
+                    help="send $PRSTAT raw GNSS fix status out the RTCM radio for the base "
+                         "display (requires --rtcm-source; flows continuously so you can "
+                         "verify fix quality before flipping the switch)")
+    fu.add_argument("--telemetry-interval", type=float, default=1.0,
+                    help="seconds between telemetry sends (default: 1.0)")
     fsw = fu.add_argument_group("switch mode (Multi-IO HAT dry-contact + LEDs)")
     fsw.add_argument("--switch", action="store_true",
                      help="gate logging with the HAT dry-contact switch (fusion runs "

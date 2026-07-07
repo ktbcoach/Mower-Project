@@ -28,7 +28,7 @@ import numpy as np
 
 from . import serial_io
 from .assembler import GnssAssembler
-from .collect import _make_injector, _log
+from .collect import _Telemeter, _make_injector, _log
 from .ekf import EkfConfig, EnuOrigin, ErrorStateKF
 from .imu import Lsm6dso, level_from_accel
 from .logger import FusedCsvLogger, GpxLogger
@@ -256,6 +256,8 @@ def fuse(
     policy: Optional[NoisePolicy] = None,
     rtcm_source: Optional[str] = None,
     rtcm_baud: int = 57600,
+    telemetry: bool = False,
+    telemetry_interval: float = 1.0,
     quiet: bool = False,
 ) -> None:
     """Run the fusion loop until Ctrl-C. ``imu`` must already be constructed."""
@@ -295,6 +297,13 @@ def fuse(
         _log(f"origin set @ {origin.lat0:.7f},{origin.lon0:.7f}; "
              f"initial heading {math.degrees(yaw0):.1f}° — fusing at {rate:g} Hz")
 
+        telemeter = None
+        if telemetry and src.injector is not None:
+            telemeter = _Telemeter(src.injector, telemetry_interval)
+            _log(f"telemetry -> base every {telemetry_interval:g}s (raw GNSS fix status)")
+        elif telemetry:
+            _log("telemetry requested but no RTCM radio (--rtcm-source) to send it on")
+
         last_t: Optional[float] = None
         last_pos_t = time.monotonic()
         last_quality: Optional[str] = first.fix_quality_name
@@ -324,6 +333,10 @@ def fuse(
                     last_quality = reading.fix_quality_name
 
             now = time.monotonic()
+            # Telemetry flows continuously (independent of the output rate) so the
+            # base display shows fix quality even before logging starts.
+            if telemeter is not None:
+                telemeter.maybe_send(last_reading, True, now)
             if now >= next_out:
                 next_out += out_period
                 coast_age = now - last_pos_t
@@ -409,6 +422,8 @@ def fuse_switched(
     policy: Optional[NoisePolicy] = None,
     rtcm_source: Optional[str] = None,
     rtcm_baud: int = 57600,
+    telemetry: bool = False,
+    telemetry_interval: float = 1.0,
     quiet: bool = False,
 ) -> None:
     """Switch-gated fusion service (Multi-IO HAT dry-contact + LEDs).
@@ -457,6 +472,13 @@ def fuse_switched(
              f"initial heading {math.degrees(yaw0):.1f}° — fusing at {rate:g} Hz; "
              f"waiting for switch")
 
+        telemeter = None
+        if telemetry and src.injector is not None:
+            telemeter = _Telemeter(src.injector, telemetry_interval)
+            _log(f"telemetry -> base every {telemetry_interval:g}s (raw GNSS fix status)")
+        elif telemetry:
+            _log("telemetry requested but no RTCM radio (--rtcm-source) to send it on")
+
         last_t: Optional[float] = None
         last_pos_t = time.monotonic()
         last_quality: Optional[str] = first.fix_quality_name
@@ -497,6 +519,12 @@ def fuse_switched(
             controls.update_indicator(session is not None, last_reading)
 
             now = time.monotonic()
+            # Telemetry flows continuously so the base can confirm fix quality
+            # BEFORE the switch is flipped; the logging flag tells the base
+            # whether a file is currently being written.
+            if telemeter is not None:
+                telemeter.maybe_send(last_reading, session is not None, now)
+
             if now >= next_out:
                 next_out += out_period
                 coast_age = now - last_pos_t
