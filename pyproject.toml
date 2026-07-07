@@ -7,13 +7,14 @@ name = "watson-dms-collector"
 version = "0.1.0"
 description = "Data collection toolkit for the Watson DMS-SGP02 GPS/inertial system on Raspberry Pi"
 requires-python = ">=3.9"
-dependencies = ["pyserial>=3.5"]
+dependencies = ["pyserial>=3.5", "numpy>=1.21"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
 # Multi-IO HAT switch/LEDs over I2C (pure Python — the default control source).
 # The Sequent library is published to PyPI as "SMmultiio" but imports as `multiio`.
-pi = ["SMmultiio"]
+# `spidev` drives the LSM6DSO IMU for the `fuse` command (enable SPI: dtparam=spi=on).
+pi = ["SMmultiio", "spidev>=3.5"]
 # Direct-GPIO switch/LED fallback only. lgpio builds from source unless swig +
 # python3-dev are installed; on Raspberry Pi OS prefer the apt packages
 # (python3-lgpio, python3-gpiozero) with a --system-site-packages venv.

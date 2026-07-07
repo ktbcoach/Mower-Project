@@ -1,1 +1,5 @@
 pyserial>=3.5
+numpy>=1.21
+# IMU over SPI (rover fusion, `fuse` command). On Raspberry Pi OS you can also
+# use the apt package python3-spidev with a --system-site-packages venv.
+spidev>=3.5; platform_system == "Linux"

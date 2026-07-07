@@ -130,6 +130,68 @@ class GpxLogger:
         self.close()
 
 
+FUSED_CSV_FIELDS = [
+    "host_time",         # Pi wall-clock (ISO-8601) when the solution was emitted
+    "utc",               # last GNSS UTC seen
+    "solution_source",   # rtk_fixed | rtk_float | dgps | gps | coast | coast_stale
+    "coast_age_s",       # seconds since the last accepted position update
+    "fused_lat",
+    "fused_lon",
+    "fused_alt_m",
+    "vel_e",             # ENU velocity (m/s)
+    "vel_n",
+    "vel_u",
+    "speed_mps",
+    "fused_heading_deg",  # 0-360, from ENU North clockwise
+    "roll_deg",
+    "pitch_deg",
+    "pos_sigma_m",        # horizontal 1-sigma from the covariance
+    "gyro_bias_x",        # estimated biases (rad/s, body)
+    "gyro_bias_y",
+    "gyro_bias_z",
+    "accel_bias_x",       # m/s^2, body
+    "accel_bias_y",
+    "accel_bias_z",
+    "fix_quality",        # raw GNSS quality code for this epoch
+    "fix_quality_name",
+    "num_sats",
+    "hdop",
+    "imu_count",          # IMU predict steps since the previous row
+]
+
+
+class FusedCsvLogger:
+    """Append EKF solutions (one row per emitted 50 Hz step) to a CSV file.
+
+    Rows carry the fused state plus the raw GNSS quality context, so a degraded
+    (float/coast) stretch is distinguishable from clean RTK-fixed data.
+    """
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        new_file = not self.path.exists() or self.path.stat().st_size == 0
+        self._fh: TextIO = self.path.open("a", newline="", encoding="utf-8")
+        self._writer = csv.DictWriter(self._fh, fieldnames=FUSED_CSV_FIELDS)
+        if new_file:
+            self._writer.writeheader()
+
+    def write(self, row: dict) -> None:
+        self._writer.writerow({k: row.get(k, "") for k in FUSED_CSV_FIELDS})
+
+    def flush(self) -> None:
+        self._fh.flush()
+
+    def close(self) -> None:
+        self._fh.close()
+
+    def __enter__(self) -> "FusedCsvLogger":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
 def _fmt(value: Optional[float], places: int) -> str:
     return "" if value is None else f"{value:.{places}f}"
 

@@ -87,6 +87,43 @@ def cmd_collect(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fuse(args: argparse.Namespace) -> int:
+    """Fuse the LSM6DSO IMU with GNSS via the ESKF and log a 50 Hz solution."""
+    from .ekf import EkfConfig
+    from .fusion import NoisePolicy, fuse
+    try:
+        from .imu import Lsm6dso
+        imu = Lsm6dso(bus=args.imu_bus, cs=args.imu_cs, odr_hz=args.imu_odr,
+                      axis_remap=args.axis_remap)
+    except ImportError as exc:
+        print(f"# {exc}", file=sys.stderr)
+        return 2
+
+    lever = tuple(float(x) for x in args.lever_arm.split(",")) if args.lever_arm else (0.0, 0.0, 0.0)
+    if len(lever) != 3:
+        print("# --lever-arm needs three comma-separated metres: x,y,z", file=sys.stderr)
+        return 2
+    cfg = EkfConfig(lever_arm=lever)
+    pol = NoisePolicy(rtk_float_scale=args.float_scale)
+
+    csv_path = args.csv or f"{args.log_dir}/lg580p-fused-{_default_stamp()}.csv"
+    gpx_path = args.gpx
+    if gpx_path is None and not args.no_gpx:
+        gpx_path = f"{args.log_dir}/lg580p-fused-{_default_stamp()}.gpx"
+    try:
+        fuse(imu=imu, port=args.port, baud=args.baud,
+             csv_path=csv_path, gpx_path=gpx_path,
+             rate=args.rate, coast_max=args.coast_max, gyro_cal_s=args.gyro_cal,
+             heading_offset_deg=args.heading_offset,
+             config=cfg, policy=pol,
+             rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud,
+             quiet=args.quiet)
+    except (RuntimeError, TimeoutError) as exc:
+        print(f"\n# {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     """Send PQTM config command(s) and show the receiver's response."""
     from .command import baseline_commands, build, send
@@ -193,6 +230,49 @@ def build_parser() -> argparse.ArgumentParser:
     sw.add_argument("--contact-invert", action="store_true",
                     help="invert: OPEN contact = logging ON")
     co.set_defaults(func=cmd_collect)
+
+    fu = sub.add_parser("fuse", parents=[common],
+                        help="fuse the LSM6DSO IMU with GNSS (ESKF) -> 50 Hz solution")
+    fu.add_argument("--baud", type=int, default=serial_io.DEFAULT_BAUD)
+    fu.add_argument("--log-dir", default="logs",
+                    help="directory for log files (default: logs)")
+    fu.add_argument("--csv", help="fused CSV path (default: <log-dir>/lg580p-fused-<ts>.csv)")
+    fu.add_argument("--gpx", help="fused GPX path (default: alongside the CSV)")
+    fu.add_argument("--no-gpx", action="store_true", help="write only the CSV")
+    fu.add_argument("--quiet", action="store_true", help="suppress the live status line")
+    fu.add_argument("--rate", type=float, default=50.0,
+                    help="fused solution output rate in Hz (default: 50)")
+    fu.add_argument("--coast-max", type=float, default=5.0,
+                    help="seconds to coast on IMU before flagging coast_stale (default: 5)")
+    fu.add_argument("--float-scale", type=float, default=40.0,
+                    help="RTK-float position sigma multiplier over rtk_fixed (default: 40)")
+    fu.add_argument("--gyro-cal", type=float, default=5.0,
+                    help="stationary gyro-bias calibration seconds at startup (default: 5)")
+    imu_g = fu.add_argument_group("IMU (LSM6DSO over SPI)")
+    imu_g.add_argument("--imu-bus", type=int, default=0, help="SPI bus (default: 0)")
+    imu_g.add_argument("--imu-cs", type=int, default=0, help="SPI chip-select (default: 0)")
+    imu_g.add_argument("--imu-odr", type=int, default=208,
+                       help="IMU output data rate in Hz (default: 208)")
+    # Rover geometry (this build): antennas are mounted LATERALLY (primary left,
+    # secondary 1 m right). The IMU's Y+ is parallel to the baseline pointing at
+    # the primary (= body left) and Z+ is up, so sensor X+ = forward and the axes
+    # already match the body frame -> 'x,y,z'. The primary antenna (GGA position)
+    # is 17.5" left and 0.5" forward of the IMU -> lever arm (0.0127, 0.4445, 0) m.
+    imu_g.add_argument("--axis-remap", default="x,y,z",
+                       help="sensor->body axis map (body: x=fwd,y=left,z=up); "
+                            "this rover: 'x,y,z' (sensor already body-aligned)")
+    imu_g.add_argument("--lever-arm", default="0.0127,0.4445,0",
+                       help="IMU->primary-antenna offset in body metres 'x,y,z'; "
+                            "this rover: 0.0127,0.4445,0 (0.5\" fwd, 17.5\" left)")
+    imu_g.add_argument("--heading-offset", type=float, default=-90.0,
+                       help="degrees added to PQTMTAR heading to get vehicle-forward "
+                            "heading. Lateral baseline (primary left) -> -90; VERIFY "
+                            "the sign in the field vs course-over-ground (default: -90)")
+    fu.add_argument("--rtcm-source",
+                    help="serial port of the RTCM correction radio (forwarded to the LG580P)")
+    fu.add_argument("--rtcm-baud", type=int, default=57600,
+                    help="baud of the RTCM correction radio (default: 57600)")
+    fu.set_defaults(func=cmd_fuse)
 
     pr = sub.add_parser("parse", help="assemble readings from a captured file")
     pr.add_argument("file", help="file of NMEA sentences, or - for stdin")
