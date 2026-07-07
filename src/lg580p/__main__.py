@@ -90,7 +90,7 @@ def cmd_collect(args: argparse.Namespace) -> int:
 def cmd_fuse(args: argparse.Namespace) -> int:
     """Fuse the LSM6DSO IMU with GNSS via the ESKF and log a 50 Hz solution."""
     from .ekf import EkfConfig
-    from .fusion import NoisePolicy, fuse
+    from .fusion import NoisePolicy, fuse, fuse_switched
     try:
         from .imu import Lsm6dso
         imu = Lsm6dso(bus=args.imu_bus, cs=args.imu_cs, odr_hz=args.imu_odr,
@@ -105,6 +105,38 @@ def cmd_fuse(args: argparse.Namespace) -> int:
         return 2
     cfg = EkfConfig(lever_arm=lever)
     pol = NoisePolicy(rtk_float_scale=args.float_scale)
+
+    if args.switch:
+        try:
+            from .controls import HatLoggingControls
+            controls = HatLoggingControls(
+                stack=args.hat_stack,
+                gps_led=args.gps_led,
+                logging_led=args.logging_led,
+                contact_channel=args.contact_channel,
+                contact_invert=args.contact_invert,
+            )
+        except ImportError as exc:
+            print(f"# {exc}", file=sys.stderr)
+            return 2
+        except Exception as exc:
+            print(f"# could not initialize HAT controls: {exc}\n"
+                  f"# (HAT seated? I2C enabled? try: i2cdetect -y 1)", file=sys.stderr)
+            return 1
+        try:
+            fuse_switched(
+                imu=imu, controls=controls, port=args.port, baud=args.baud,
+                log_dir=args.log_dir, gpx=not args.no_gpx,
+                rate=args.rate, coast_max=args.coast_max, gyro_cal_s=args.gyro_cal,
+                heading_offset_deg=args.heading_offset,
+                config=cfg, policy=pol,
+                rtcm_source=args.rtcm_source, rtcm_baud=args.rtcm_baud,
+                quiet=args.quiet,
+            )
+        except (RuntimeError, TimeoutError) as exc:
+            print(f"\n# {exc}", file=sys.stderr)
+            return 1
+        return 0
 
     csv_path = args.csv or f"{args.log_dir}/lg580p-fused-{_default_stamp()}.csv"
     gpx_path = args.gpx
@@ -272,6 +304,19 @@ def build_parser() -> argparse.ArgumentParser:
                     help="serial port of the RTCM correction radio (forwarded to the LG580P)")
     fu.add_argument("--rtcm-baud", type=int, default=57600,
                     help="baud of the RTCM correction radio (default: 57600)")
+    fsw = fu.add_argument_group("switch mode (Multi-IO HAT dry-contact + LEDs)")
+    fsw.add_argument("--switch", action="store_true",
+                     help="gate logging with the HAT dry-contact switch (fusion runs "
+                          "continuously; only the CSV/GPX writing is gated)")
+    fsw.add_argument("--hat-stack", type=int, default=0, help="HAT stack address (default: 0)")
+    fsw.add_argument("--gps-led", type=int, default=1,
+                     help="HAT LED for GPS status: off=no fix, blink=fix, solid=RTK fixed (default: 1)")
+    fsw.add_argument("--logging-led", type=int, default=2,
+                     help="HAT LED for logging status: off=idle, blink=logging (default: 2)")
+    fsw.add_argument("--contact-channel", type=int, default=1,
+                     help="dry-contact/opto input channel (default: 1)")
+    fsw.add_argument("--contact-invert", action="store_true",
+                     help="invert: OPEN contact = logging ON")
     fu.set_defaults(func=cmd_fuse)
 
     pr = sub.add_parser("parse", help="assemble readings from a captured file")

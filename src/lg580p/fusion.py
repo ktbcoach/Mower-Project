@@ -162,6 +162,22 @@ def _label(coast_age: float, last_quality: Optional[str], coast_max: float) -> s
     return "coast_stale"
 
 
+def _format_status(source: str, coast_age: float, row: dict) -> str:
+    """One-line terminal status: enough to verify the solution without a CSV —
+    position, fix quality (e.g. 'gps' with no RTCM connected), heading, speed,
+    and the horizontal 1-sigma so a float/coast stretch is visible live.
+
+    Plain ASCII only (no degree sign / sigma) — some Windows consoles default
+    to cp1252, which can't encode them and crashes the print.
+    """
+    return (
+        f"[{source:<11}] coast={coast_age:4.1f}s "
+        f"lat={row['fused_lat']:>11} lon={row['fused_lon']:>13} "
+        f"hdg={row['fused_heading_deg']:>6}deg spd={row['speed_mps']:>5}m/s "
+        f"q={(row['fix_quality_name'] or '--'):<9} sd={row['pos_sigma_m']:>5}m"
+    )
+
+
 def _build_row(ekf: ErrorStateKF, origin: EnuOrigin, last_reading: Optional[GnssReading],
                source: str, coast_age: float, imu_count: int,
                host_time: _dt.datetime) -> dict:
@@ -324,10 +340,7 @@ def fuse(
                         GnssReading(latitude_deg=lat, longitude_deg=lon,
                                     altitude_m=alt, fix_quality=4), host_time)
                 if not quiet:
-                    sys.stdout.write(
-                        f"\r[{source:<11}] coast={coast_age:4.1f}s "
-                        f"hdg={row['fused_heading_deg']:>6}° "
-                        f"σ={row['pos_sigma_m']:>5}m")
+                    sys.stdout.write("\r" + _format_status(source, coast_age, row))
                     sys.stdout.flush()
                 if now - last_flush >= _FLUSH_INTERVAL_S:
                     if csv_logger:
@@ -346,3 +359,171 @@ def fuse(
             gpx_logger.close()
         if not quiet:
             _log("fusion stopped")
+
+
+class _FusedSession:
+    """One fused CSV/GPX file set for a single switch-ON period."""
+
+    def __init__(self, log_dir: Path, gpx: bool):
+        stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.csv = FusedCsvLogger(log_dir / f"lg580p-fused-{stamp}.csv")
+        self.gpx = (
+            GpxLogger(log_dir / f"lg580p-fused-{stamp}.gpx", track_name="LG580P fused track")
+            if gpx else None
+        )
+        self.count = 0
+        self.name = self.csv.path.name
+
+    def write(self, row: dict, lat: float, lon: float, alt: float,
+              host_time: _dt.datetime) -> None:
+        self.csv.write(row)
+        if self.gpx:
+            self.gpx.write(
+                GnssReading(latitude_deg=lat, longitude_deg=lon, altitude_m=alt, fix_quality=4),
+                host_time)
+        self.count += 1
+
+    def flush(self) -> None:
+        self.csv.flush()
+        if self.gpx:
+            self.gpx.flush()
+
+    def close(self) -> None:
+        self.csv.close()
+        if self.gpx:
+            self.gpx.close()
+
+
+def fuse_switched(
+    imu: Lsm6dso,
+    controls,
+    port: str = serial_io.DEFAULT_PORT,
+    baud: int = serial_io.DEFAULT_BAUD,
+    log_dir: str | Path = "logs",
+    gpx: bool = True,
+    rate: float = 50.0,
+    coast_max: float = 5.0,
+    gyro_cal_s: float = 5.0,
+    heading_offset_deg: float = 0.0,
+    config: Optional[EkfConfig] = None,
+    policy: Optional[NoisePolicy] = None,
+    rtcm_source: Optional[str] = None,
+    rtcm_baud: int = 57600,
+    quiet: bool = False,
+) -> None:
+    """Switch-gated fusion service (Multi-IO HAT dry-contact + LEDs).
+
+    The IMU/EKF start and run continuously from launch (one gyro-bias
+    calibration, one origin) so the filter is warm the instant the switch
+    flips ON — only the CSV/GPX *logging* is gated, one file set per ON period,
+    mirroring :func:`lg580p.collect.collect_switched`.
+    """
+    if controls is None:
+        raise ValueError("fuse_switched requires a controls instance")
+
+    cfg = config or EkfConfig()
+    pol = policy or NoisePolicy()
+    out_period = 1.0 / rate
+    heading_offset_rad = math.radians(heading_offset_deg)
+    log_dir = Path(log_dir)
+    session: Optional[_FusedSession] = None
+
+    src = _GnssSource(port, baud, "GGA", rtcm_source, rtcm_baud)
+    src.start()
+    try:
+        imu.open()
+        _log(f"IMU up; calibrating gyro bias ({gyro_cal_s:g}s, hold still)…")
+        gyro_bias, mean_accel, n = imu.calibrate(gyro_cal_s)
+        roll0, pitch0 = level_from_accel(mean_accel)
+        _log(f"gyro bias {np.round(gyro_bias, 4)} rad/s from {int(n)} samples; "
+             f"level roll={math.degrees(roll0):.1f} pitch={math.degrees(pitch0):.1f}")
+
+        _log("waiting for first GNSS fix to set the tangent-plane origin…")
+        first = _wait_for_first_fix(src)
+        origin = EnuOrigin(first.latitude_deg, first.longitude_deg,
+                           first.altitude_m if first.altitude_m is not None else 0.0)
+
+        ekf = ErrorStateKF(cfg)
+        ekf.set_gyro_bias(gyro_bias)
+        if first.heading_deg is not None:
+            yaw0 = math.radians(first.heading_deg) + heading_offset_rad
+        elif first.course_deg is not None and (first.speed_kph or 0) > 1.0:
+            yaw0 = math.radians(first.course_deg)
+        else:
+            yaw0 = 0.0
+        ekf.set_attitude(roll0, pitch0, yaw0)
+        ekf.p = origin.to_enu(first.latitude_deg, first.longitude_deg, origin.alt0)
+        _log(f"origin set @ {origin.lat0:.7f},{origin.lon0:.7f}; "
+             f"initial heading {math.degrees(yaw0):.1f}° — fusing at {rate:g} Hz; "
+             f"waiting for switch")
+
+        last_t: Optional[float] = None
+        last_pos_t = time.monotonic()
+        last_quality: Optional[str] = first.fix_quality_name
+        last_reading: Optional[GnssReading] = first
+        next_out = time.monotonic() + out_period
+        last_flush = time.monotonic()
+        imu_count = 0
+
+        while True:
+            if src.error:
+                raise src.error
+
+            logging_on = controls.logging_on
+            if logging_on and session is None:
+                session = _FusedSession(log_dir, gpx)
+                _log(f"logging STARTED -> {session.name}")
+            elif not logging_on and session is not None:
+                _log(f"logging STOPPED ({session.count} rows) -> {session.name}")
+                session.close()
+                session = None
+
+            sample = _read_imu_paced(imu)
+            if last_t is not None:
+                ekf.predict(sample.t_mono - last_t, sample.accel, sample.gyro)
+                imu_count += 1
+            last_t = sample.t_mono
+
+            while True:
+                try:
+                    reading, _t = src.queue.get_nowait()
+                except queue.Empty:
+                    break
+                last_reading = reading
+                if _apply_gnss(ekf, reading, origin, pol, heading_offset_rad):
+                    last_pos_t = time.monotonic()
+                    last_quality = reading.fix_quality_name
+
+            controls.update_indicator(session is not None, last_reading)
+
+            now = time.monotonic()
+            if now >= next_out:
+                next_out += out_period
+                coast_age = now - last_pos_t
+                source = _label(coast_age, last_quality, coast_max)
+                host_time = _dt.datetime.now(_dt.timezone.utc)
+                row = _build_row(ekf, origin, last_reading, source, coast_age,
+                                 imu_count, host_time)
+                imu_count = 0
+                if session is not None:
+                    lat, lon, alt = origin.to_geodetic(ekf.p)
+                    session.write(row, lat, lon, alt, host_time)
+                if not quiet:
+                    state = "LOG" if session is not None else "idle"
+                    sys.stdout.write(f"\r[{state}] {_format_status(source, coast_age, row)}")
+                    sys.stdout.flush()
+                if session is not None and now - last_flush >= _FLUSH_INTERVAL_S:
+                    session.flush()
+                    last_flush = now
+    except KeyboardInterrupt:
+        pass
+    finally:
+        src.stop()
+        imu.close()
+        if session is not None:
+            session.close()
+            _log(f"logging stopped on exit -> {session.name}")
+        controls.update_indicator(False, None)
+        controls.close()
+        if not quiet:
+            _log("fusion service stopped")

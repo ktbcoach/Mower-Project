@@ -120,6 +120,43 @@ python -m lg580p fuse \
 Startup sequence: open IMU → calibrate gyro bias & level from gravity → wait for
 the first GNSS fix (sets the ENU origin + seeds heading from `PQTMTAR`) → fuse.
 
+### Field switch (Multi-IO HAT dry-contact + LEDs)
+
+`--switch` mirrors `collect --switch`: the same flags (`--hat-stack`,
+`--gps-led`, `--logging-led`, `--contact-channel`, `--contact-invert`) gate
+**logging**, not fusion — the IMU calibrates once and the EKF runs
+continuously from launch (so it's warm the instant the switch flips ON), and
+each ON period writes its own `lg580p-fused-<ts>.csv`/`.gpx` file set.
+
+```bash
+python -m lg580p fuse --switch --rtcm-source /dev/ttyAMA5
+sudo bash scripts/install_lg580p_service.sh   # if you want this at boot instead of `collect`
+```
+
+Only run one of `collect --switch` / `fuse --switch` at a time — both grab the
+serial port and the HAT.
+
+### Verifying without RTK corrections (standalone GPS)
+
+`fuse` needs no `--rtcm-source` to run — the terminal status line is the
+verification tool:
+
+```bash
+python -m lg580p fuse --gyro-cal 5
+```
+
+```
+[gps        ] coast= 0.3s lat= 44.4200000 lon= -72.9800000 hdg= 90.00deg spd=0.000m/s q=gps       sd=1.414m
+```
+
+With no corrections flowing, `q=` should read **`gps`** (quality 1, standalone)
+— it will never reach `dgps`/`rtk_float`/`rtk_fixed` without a correction
+source. Confirms: the position sigma (`sd=`) sits around the `NoisePolicy.gps`
+default (~3 m, HDOP-scaled) instead of the tight RTK values, heading tracks
+`PQTMTAR` if the dual-antenna solution is up, and pulling the antenna cable
+should show `q=` drop to `coast`/`coast_stale` after `--coast-max` while the
+position keeps moving smoothly on IMU alone.
+
 ## Tuning
 
 - **`EkfConfig`** (`ekf.py`) — process noise (`accel_noise`, `gyro_noise`, bias
