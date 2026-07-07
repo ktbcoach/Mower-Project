@@ -1,18 +1,23 @@
 [Unit]
-Description=SparkFun LG580P RTK GNSS logger (switch-gated)
+Description=SparkFun LG580P + LSM6DSO IMU fusion logger (switch-gated, 50 Hz EKF)
 After=local-fs.target
 
 [Service]
 Type=simple
 User=__USER__
-# dialout = serial port, i2c = Multi-IO HAT (switch/LEDs).
-SupplementaryGroups=dialout i2c
+# dialout = serial port, i2c = Multi-IO HAT (switch/LEDs), spi = LSM6DSO IMU.
+SupplementaryGroups=dialout i2c spi
 WorkingDirectory=__APPDIR__
-ExecStart=__PYTHON__ -m lg580p collect --switch \
+ExecStart=__PYTHON__ -m lg580p fuse --switch \
   --port __PORT__ --baud __BAUD__ \
   --hat-stack __HAT_STACK__ \
   --gps-led __GPS_LED__ --logging-led __LOGGING_LED__ \
-  --contact-channel __CONTACT_CH__ __RTCM_ARGS__ __TELEMETRY_ARGS__ \
+  --contact-channel __CONTACT_CH__ \
+  --imu-bus __IMU_BUS__ --imu-cs __IMU_CS__ --imu-odr __IMU_ODR__ \
+  --axis-remap __AXIS_REMAP__ --lever-arm __LEVER_ARM__ \
+  --heading-offset __HEADING_OFFSET__ \
+  --rate __RATE__ --coast-max __COAST_MAX__ --gyro-cal __GYRO_CAL__ \
+  --float-scale __FLOAT_SCALE__ __RTCM_ARGS__ \
   --log-dir __APPDIR__/logs --quiet
 Restart=always
 RestartSec=3
