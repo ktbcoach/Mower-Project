@@ -901,8 +901,14 @@ class Dashboard(BoxLayout):
         self.cells["speed"].set("--" if s.speed_kph is None else f"{s.speed_kph:.1f} km/h")
         self.cells["corr"].set("--" if s.corr is None else ("FLOWING" if s.corr else "none"),
                                GREEN if s.corr else FG)
-        self.cells["log"].set("--" if s.logging is None else ("LOGGING" if s.logging else "idle"),
-                              GREEN if s.logging else FG)
+        # Logging is a "right now" state — a frozen last value would falsely
+        # imply the rover is still recording. When telemetry isn't live (bridge
+        # stopped or the rover service is off / link stale) show N/A instead.
+        if not live:
+            self.cells["log"].set("N/A", DIM)
+        else:
+            self.cells["log"].set("--" if s.logging is None else ("LOGGING" if s.logging else "idle"),
+                                  GREEN if s.logging else FG)
 
         # Compact connection line: state + platform + bytes + RTCM types + radio.
         parts = [f"NTRIP: {snap['conn']}"]
