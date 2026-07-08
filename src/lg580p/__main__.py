@@ -94,7 +94,7 @@ def cmd_fuse(args: argparse.Namespace) -> int:
     try:
         from .imu import Lsm6dso
         imu = Lsm6dso(bus=args.imu_bus, cs=args.imu_cs, odr_hz=args.imu_odr,
-                      axis_remap=args.axis_remap)
+                      axis_remap=args.axis_remap, spi_mode=args.spi_mode)
     except ImportError as exc:
         print(f"# {exc}", file=sys.stderr)
         return 2
@@ -287,6 +287,8 @@ def build_parser() -> argparse.ArgumentParser:
     imu_g.add_argument("--imu-cs", type=int, default=0, help="SPI chip-select (default: 0)")
     imu_g.add_argument("--imu-odr", type=int, default=208,
                        help="IMU output data rate in Hz (default: 208)")
+    imu_g.add_argument("--spi-mode", type=int, default=0, choices=(0, 1, 2, 3),
+                       help="SPI mode (default: 0; the aux SPI1 bus needs 0, not 3)")
     # Rover geometry (this build): antennas are mounted LATERALLY (primary left,
     # secondary 1 m right). The IMU's Y+ is parallel to the baseline pointing at
     # the primary (= body left) and Z+ is up, so sensor X+ = forward and the axes

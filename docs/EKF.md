@@ -14,18 +14,28 @@ plus a `FusedCsvLogger` in `logger.py` and the `fuse` CLI subcommand.
 | | |
 |---|---|
 | IMU | SparkFun LSM6DSO (STMicro, 6-axis, `WHO_AM_I` = `0x6C`) |
-| Interface | Pi **SPI0** — MOSI GPIO10, MISO GPIO9, SCLK GPIO11, CE0 GPIO8 (CE1 GPIO7) |
-| SPI mode | **3** (CPOL=1, CPHA=1), up to ~10 MHz |
+| Interface | Pi **SPI1** (aux) — CE0 GPIO18 (pin 12), MISO GPIO19 (pin 35), MOSI GPIO20 (pin 38), SCLK GPIO21 (pin 40) |
+| SPI mode | **0** (CPOL=CPHA=0). The aux SPI1 is flaky with mode 3; the driver defaults to mode 0 (override with `--spi-mode`) |
 | Config | accel ODR 208 Hz ±4 g · gyro ODR 208 Hz ±500 dps · BDU + auto-increment |
-| Coexistence | The Multi-IO HAT uses only I2C + UART5, so SPI0 is free |
+| INT1 | not used — the driver polls `STATUS_REG` over SPI; leave INT1 unconnected |
 
-Enable SPI once on the Pi:
+> **Why SPI1, not SPI0:** the LG580P Flex pHAT breaks out spare UARTs on the SPI0
+> pins (GPIO8–11) through jumpers **JP8–JP11, closed by default**, so JP9 actively
+> drives GPIO9/MISO and clobbers SPI0. Either open JP8–JP11 to free SPI0, or (the
+> path taken here) use **SPI1** on pins 12/35/38/40, which the LG580P pHAT and the
+> Multi-IO HAT both leave unconnected. The Multi-IO HAT itself uses only I2C +
+> UART5.
+
+Enable the **aux SPI1** on the Pi:
 
 ```bash
-sudo raspi-config nonint do_spi 0     # or add dtparam=spi=on to /boot/firmware/config.txt
+echo 'dtoverlay=spi1-1cs' | sudo tee -a /boot/firmware/config.txt
 sudo reboot
-ls /dev/spidev0.*                     # spidev0.0 (CE0), spidev0.1 (CE1)
+ls /dev/spidev1.*                     # spidev1.0 (SPI1 CE0)
 ```
+
+The IMU is on bus 1: pass `--imu-bus 1` (the default is 0), or set `IMU_BUS=1`
+when installing the service.
 
 Install the driver dependency (into the same venv as the logger):
 

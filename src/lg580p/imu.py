@@ -1,6 +1,7 @@
 """SparkFun LSM6DSO 6-axis IMU driver (SPI) for the rover.
 
-STMicro LSM6DSO: 3-axis accel + 3-axis gyro, SPI mode 3 (CPOL=CPHA=1). Wired to
+STMicro LSM6DSO: 3-axis accel + 3-axis gyro, SPI mode 0 (also supports mode 3;
+mode 0 is used by default as it works on both SPI0 and the aux SPI1). Wired to
 the Pi's SPI bus (the Multi-IO HAT uses only I2C + UART5, so SPI0 is free). This
 driver configures the sensor, applies the datasheet sensitivity to yield SI
 units, and remaps the sensor axes into the vehicle body frame.
@@ -90,6 +91,7 @@ class Lsm6dso:
         odr_hz: int = 208,
         axis_remap: str = "x,y,z",
         speed_hz: int = 8_000_000,
+        spi_mode: int = 0,
         transfer: Optional[Callable[[list[int]], list[int]]] = None,
     ):
         self.odr_hz = odr_hz
@@ -98,7 +100,7 @@ class Lsm6dso:
         if transfer is not None:
             self._transfer = transfer
         else:
-            self._spi = _open_spi(bus, cs, speed_hz)
+            self._spi = _open_spi(bus, cs, speed_hz, spi_mode)
             self._transfer = self._spi.xfer2
 
     # -- low-level SPI ----------------------------------------------------- #
@@ -115,7 +117,7 @@ class Lsm6dso:
         if who != _WHO_AM_I_VAL:
             raise RuntimeError(
                 f"LSM6DSO WHO_AM_I mismatch: got 0x{who:02X}, expected 0x{_WHO_AM_I_VAL:02X} "
-                f"(check SPI wiring/CS, mode 3, and that this is an LSM6DSO)"
+                f"(check SPI wiring/CS/bus, --spi-mode, and that this is an LSM6DSO)"
             )
         code = _ODR_CODES.get(self.odr_hz)
         if code is None:
@@ -190,7 +192,7 @@ def level_from_accel(mean_accel: np.ndarray) -> tuple[float, float]:
     return roll, pitch
 
 
-def _open_spi(bus: int, cs: int, speed_hz: int):
+def _open_spi(bus: int, cs: int, speed_hz: int, mode: int = 0):
     try:
         import spidev  # type: ignore
     except ImportError as exc:  # pragma: no cover - only without spidev
@@ -201,5 +203,8 @@ def _open_spi(bus: int, cs: int, speed_hz: int):
     spi = spidev.SpiDev()
     spi.open(bus, cs)
     spi.max_speed_hz = speed_hz
-    spi.mode = 0b11   # SPI mode 3 (CPOL=1, CPHA=1)
+    # LSM6DSO supports SPI mode 0 (CPOL=CPHA=0) and mode 3. Mode 0 is the safe
+    # default: it works on SPI0 and on the Pi's aux SPI (SPI1), which is flaky
+    # with mode 3 (CPHA=1). Override with --spi-mode if needed.
+    spi.mode = mode & 0b11
     return spi
