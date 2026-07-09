@@ -50,11 +50,18 @@ instead of systemd).
    # NTRIP_MOUNTPOINT=VCAP_RTCM3
    # BASE_SERIAL=COM3
    # BASE_SERIAL_BAUD=19200
+   # GGA_FROM_ROVER=1     (VRS GGA tracks the rover; set 0 for a fixed LAT/LON)
    ```
 
    Set `BASE_SERIAL` to the COM port from step 3 if it isn’t `COM3`. This file is
    gitignored — the credentials never get committed. Same `KEY=VALUE` format as
    the Pi's `ntrip-base.env`.
+
+   For a **VRS/network-RTK** mountpoint the bridge, by default (`GGA_FROM_ROVER=1`),
+   builds the position it sends the caster from the rover's own `$PRSTAT`
+   telemetry, so the virtual base follows the rover — no `LAT`/`LON` needed. A
+   `LAT`/`LON` you do set is used only to seed corrections until the rover's first
+   fix comes back. Set `GGA_FROM_ROVER=0` to send a fixed `LAT`/`LON` instead.
 
 ## Running it
 

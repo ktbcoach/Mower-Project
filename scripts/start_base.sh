@@ -31,6 +31,9 @@ SERIAL_BAUD="${BASE_SERIAL_BAUD:-19200}"
 # Network-RTK / VRS mountpoints need an approximate position. Set both LAT/LON.
 LAT="${LAT:-}"
 LON="${LON:-}"
+# VRS GGA tracks the rover's reported position (LAT/LON, if set, seed it until
+# the first rover fix arrives). Set GGA_FROM_ROVER=0 to use a fixed LAT/LON only.
+GGA_FROM_ROVER="${GGA_FROM_ROVER:-1}"
 
 if [[ -z "${NTRIP_USER:-}" || -z "${NTRIP_PASSWORD:-}" ]]; then
   echo "NTRIP_USER / NTRIP_PASSWORD not set. Put them in $ENV_FILE or export them." >&2
@@ -44,8 +47,14 @@ elif [[ -n "$LAT" || -n "$LON" ]]; then
   echo "Set BOTH LAT and LON (or neither) — only one was given." >&2
   exit 1
 fi
+if [[ "$GGA_FROM_ROVER" != "0" ]]; then
+  GGA_ARGS+=(--gga-from-rover)
+  GGA_NOTE="  (GGA follows rover${LAT:+ seeded $LAT,$LON})"
+else
+  GGA_NOTE="${LAT:+  (GGA $LAT,$LON)}"
+fi
 
-echo "# base bridge: $HOST:$PORT/$MOUNTPOINT -> $SERIAL @ $SERIAL_BAUD${LAT:+  (GGA $LAT,$LON)}"
+echo "# base bridge: $HOST:$PORT/$MOUNTPOINT -> $SERIAL @ $SERIAL_BAUD$GGA_NOTE"
 # ntrip_to_serial.py reads NTRIP_USER/NTRIP_PASSWORD from the environment.
 exec "$PYTHON" "$APPDIR/tools/ntrip_to_serial.py" \
   --host "$HOST" --port "$PORT" --mountpoint "$MOUNTPOINT" \

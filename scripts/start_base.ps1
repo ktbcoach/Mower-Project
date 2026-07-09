@@ -68,6 +68,7 @@ $Baud     = Get-Setting 'BASE_SERIAL_BAUD' $cfg '19200'
 $StatusF  = Get-Setting 'STATUS_FILE'      $cfg (Join-Path $AppDir 'rover-status.txt')
 $Lat      = Get-Setting 'LAT'              $cfg ''
 $Lon      = Get-Setting 'LON'              $cfg ''
+$Follow   = Get-Setting 'GGA_FROM_ROVER'   $cfg '1'   # VRS GGA tracks the rover; set 0 to use a fixed LAT/LON
 
 $bridge = Join-Path $AppDir 'tools\ntrip_to_serial.py'
 
@@ -90,9 +91,16 @@ if ($Lat -and $Lon) {
     Write-Host "Set BOTH LAT and LON (or neither) - only one was given." -ForegroundColor Red
     exit 1
 }
+$following = $Follow -and ($Follow -ne '0')
+if ($following) { $ggaArgs += '--gga-from-rover' }
 
 $ggaNote = ''
-if ($ggaArgs.Count -gt 0) { $ggaNote = "  (GGA $Lat,$Lon)" }
+if ($following) {
+    $seedNote = if ($Lat -and $Lon) { " seeded $Lat,$Lon" } else { '' }
+    $ggaNote = "  (GGA follows rover$seedNote)"
+} elseif ($ggaArgs.Count -gt 0) {
+    $ggaNote = "  (GGA $Lat,$Lon)"
+}
 Write-Host "# base bridge: ${Host_}:${Port}/${Mount} -> $Serial @ $Baud$ggaNote"
 
 # ntrip_to_serial.py reads NTRIP_USER / NTRIP_PASSWORD from the environment

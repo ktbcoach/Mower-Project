@@ -148,13 +148,56 @@ def _write_atomic(path: str, text: str) -> None:
     os.replace(tmp, path)
 
 
-def status_reader(ser, path: str, stop: threading.Event) -> None:
-    """Read the radio for rover ``$PRSTAT`` telemetry and mirror the latest line
-    to ``path`` (the base display polls it). Runs in its own thread; the serial
-    port is full-duplex so this reads while the main loop writes RTCM.
+class RoverPosition:
+    """Thread-safe holder for the rover's latest reported position.
 
-    Kept deliberately dumb (no parsing) so this file stays standalone — the
-    display parses the line via lg580p.telemetry.
+    The status thread writes it (from ``$PRSTAT`` telemetry); the main loop
+    reads it to build the VRS GGA so the virtual base tracks the rover.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._pos: tuple[float, float, float] | None = None
+
+    def set(self, lat: float, lon: float, alt: float) -> None:
+        with self._lock:
+            self._pos = (lat, lon, alt)
+
+    def get(self) -> tuple[float, float, float] | None:
+        with self._lock:
+            return self._pos
+
+
+def _prstat_position(line: str) -> tuple[float, float, float] | None:
+    """Extract (lat, lon, alt) from a ``$PRSTAT`` line, or None.
+
+    Field order (see lg580p.telemetry): PRSTAT,seq,fixq,satsU,satsT,cn0max,
+    cn0avg,LAT,LON,ALT,...  — so lat/lon/alt are parts[7:10]. Validates the XOR
+    checksum first (a radio glitch mustn't relocate the virtual base). Parsed
+    inline so this file stays standalone (stdlib + pyserial only).
+    """
+    star = line.rfind("*")
+    if star == -1 or star + 3 > len(line):
+        return None
+    if nmea_checksum(line[1:star]) != line[star + 1 : star + 3].upper():
+        return None
+    parts = line[1:star].split(",")
+    try:
+        lat, lon = float(parts[7]), float(parts[8])
+        alt = float(parts[9]) if parts[9] else 0.0
+    except (IndexError, ValueError):
+        return None
+    if lat == 0.0 and lon == 0.0:  # no real fix yet
+        return None
+    return lat, lon, alt
+
+
+def status_reader(ser, path: str | None, rover_pos: "RoverPosition | None",
+                  stop: threading.Event) -> None:
+    """Read the radio for rover ``$PRSTAT`` telemetry. Mirrors the latest line to
+    ``path`` (the base display polls it) and, when ``rover_pos`` is given, feeds
+    the parsed rover position to the GGA builder. Runs in its own thread; the
+    serial port is full-duplex so this reads while the main loop writes RTCM.
     """
     buf = bytearray()
     while not stop.is_set():
@@ -175,10 +218,15 @@ def status_reader(ser, path: str, stop: threading.Event) -> None:
             line = bytes(buf[:nl]).decode("ascii", "replace").strip()
             del buf[: nl + 1]
             if line.startswith("$PRSTAT"):
-                try:
-                    _write_atomic(path, line + "\n")
-                except OSError as exc:
-                    print(f"# status-file write failed: {exc}")
+                if path:
+                    try:
+                        _write_atomic(path, line + "\n")
+                    except OSError as exc:
+                        print(f"# status-file write failed: {exc}")
+                if rover_pos is not None:
+                    pos = _prstat_position(line)
+                    if pos is not None:
+                        rover_pos.set(*pos)
 
 
 def connect(args) -> socket.socket:
@@ -210,46 +258,78 @@ def connect(args) -> socket.socket:
 def run(args) -> int:
     ser = None
     stop = threading.Event()
+    rover_pos = RoverPosition() if args.gga_from_rover else None
     if args.serial:
         ser = serial.Serial(args.serial, args.serial_baud, timeout=1)
         print(f"# forwarding RTCM -> {args.serial} @ {args.serial_baud}")
-        if args.status_file:
+        if args.status_file or rover_pos is not None:
             threading.Thread(
-                target=status_reader, args=(ser, args.status_file, stop),
+                target=status_reader, args=(ser, args.status_file, rover_pos, stop),
                 name="status", daemon=True,
             ).start()
-            print(f"# rover telemetry -> {args.status_file}")
+            if args.status_file:
+                print(f"# rover telemetry -> {args.status_file}")
     else:
         print("# MONITOR mode (no --serial): validating the stream only")
-    gga = None
+
+    # GGA position for VRS mountpoints. A fixed --lat/--lon is the "seed"; with
+    # --gga-from-rover the rover's own reported position takes over as soon as
+    # the first telemetry arrives (and keeps tracking it), so the virtual base
+    # follows the rover with no hand-entered coordinate.
+    seed = None
     if args.lat is not None and args.lon is not None:
-        gga = build_gga(args.lat, args.lon, args.alt)
-        print(f"# sending GGA every {args.gga_interval}s (position for VRS mountpoints)")
+        seed = (args.lat, args.lon, args.alt)
+    if rover_pos is not None:
+        how = "seeded until first rover fix" if seed else "waiting for first rover fix"
+        print(f"# GGA follows the rover's reported position ({how})")
+    elif seed:
+        print(f"# sending GGA every {args.gga_interval:g}s (fixed position for VRS mountpoints)")
+
+    def gga_position():
+        if rover_pos is not None:
+            pos = rover_pos.get()
+            if pos is not None:
+                return pos
+        return seed
 
     scanner = RtcmScanner()
     total = 0
     while True:
         try:
             sock = connect(args)
-            if gga:
-                sock.sendall(gga)
-            last_gga = last_report = time.monotonic()
-            sock.settimeout(30)
+            sock.settimeout(1.0)
+            last_report = last_rx = time.monotonic()
+            last_gga = 0.0
+            last_sent_key = None
             while True:
-                data = sock.recv(1024)
+                now = time.monotonic()
+                # Send GGA as soon as we have a position, then every interval.
+                # A short recv timeout (below) lets this fire promptly even when
+                # the caster is sending nothing yet (it waits for our GGA first).
+                pos = gga_position()
+                if pos is not None and (last_gga == 0.0 or now - last_gga >= args.gga_interval):
+                    sock.sendall(build_gga(*pos))
+                    last_gga = now
+                    key = (round(pos[0], 5), round(pos[1], 5))  # ~1 m
+                    if key != last_sent_key:
+                        print(f"# GGA position -> {pos[0]:.7f},{pos[1]:.7f}")
+                        last_sent_key = key
+                try:
+                    data = sock.recv(1024)
+                except socket.timeout:
+                    if now - last_rx > 30:
+                        raise ConnectionError("no data for 30s")
+                    continue
                 if not data:
                     raise ConnectionError("stream ended")
+                last_rx = time.monotonic()
                 if ser:
                     ser.write(data)
                 scanner.feed(data)
                 total += len(data)
-                now = time.monotonic()
                 if now - last_report >= 3:
                     print(f"# {total} bytes; RTCM msgs {scanner.summary()}")
                     last_report = now
-                if gga and now - last_gga >= args.gga_interval:
-                    sock.sendall(gga)
-                    last_gga = now
         except KeyboardInterrupt:
             stop.set()
             print("\n# stopped")
@@ -278,6 +358,10 @@ def main() -> int:
     p.add_argument("--lon", type=float, help="fixed GGA longitude")
     p.add_argument("--alt", type=float, default=100.0, help="fixed GGA altitude (m)")
     p.add_argument("--gga-interval", type=float, default=10.0)
+    p.add_argument("--gga-from-rover", action="store_true",
+                   help="build the VRS GGA from the rover's reported position (via $PRSTAT "
+                        "telemetry) so the virtual base tracks the rover; --lat/--lon, if "
+                        "given, seed it until the first rover fix arrives")
     args = p.parse_args()
     if args.list:
         return list_sourcetable(args)
