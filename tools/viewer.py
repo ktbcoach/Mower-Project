@@ -2,7 +2,8 @@
 """
 Mower run viewer.
 
-Loads an LG580P (or Watson) CSV file and displays:
+Loads a raw LG580P/Watson CSV *or* a fused EKF CSV (`lg580p fuse`) — the format
+is auto-detected — and displays:
   - Green shaded area  : total swept blade path (54-inch cut)
   - Red line           : mower centre track
   - Black line + arrow : antenna baseline and forward heading at the slider position
@@ -97,41 +98,73 @@ def _right_unit(heading_deg: float) -> tuple[float, float]:
     return math.cos(θ), -math.sin(θ)
 
 
+# Heading correction differs by log format. The raw collect/Watson CSV stores the
+# PQTMTAR *baseline* heading, so the viewer rotates it to vehicle-forward with
+# HEADING_OFFSET_DEG. The fused EKF CSV stores yaw with that offset already
+# applied (fuse's --heading-offset defaults to -90, matching this file), so its
+# heading is already forward — apply 0. Override either with --heading-offset.
+DEFAULT_HEADING_OFFSET = {"raw": HEADING_OFFSET_DEG, "fused": 0.0}
+
+
 # ── CSV loading ────────────────────────────────────────────────────────────────
-def load_csv(path: Path) -> list[dict]:
-    """Return only rows that have a valid GPS fix and heading."""
+def load_csv(path: Path) -> tuple[list[dict], str]:
+    """Load rows with a valid position + heading, auto-detecting the log format.
+
+    Two formats are supported (returned as the second tuple element):
+      * ``"raw"``   — collect/Watson CSV: ``latitude_deg`` / ``heading_deg``,
+                      speed in km/h (``speed_kph`` or ``velocity_kph``).
+      * ``"fused"`` — EKF CSV (``lg580p fuse``): ``fused_lat`` /
+                      ``fused_heading_deg``, speed in m/s (``speed_mps``),
+                      plus ``solution_source`` and ``pos_sigma_m`` context.
+    """
     rows: list[dict] = []
     with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
+        reader = csv.DictReader(f)
+        cols = set(reader.fieldnames or [])
+        fused = "fused_lat" in cols
+        lat_k = "fused_lat" if fused else "latitude_deg"
+        lon_k = "fused_lon" if fused else "longitude_deg"
+        hdg_k = "fused_heading_deg" if fused else "heading_deg"
+        for row in reader:
             try:
-                lat = float(row["latitude_deg"])
-                lon = float(row["longitude_deg"])
-                hdg = float(row["heading_deg"])
+                lat = float(row[lat_k])
+                lon = float(row[lon_k])
+                hdg = float(row[hdg_k])
             except (KeyError, ValueError, TypeError):
                 continue
-            if not (row["latitude_deg"] and row["longitude_deg"] and row["heading_deg"]):
-                continue
+            if fused:
+                mps = row.get("speed_mps") or ""
+                velocity_kph = f"{float(mps) * 3.6:.3f}" if mps else ""
+                source = row.get("solution_source", "")   # rtk_fixed | float | coast | …
+                sigma = row.get("pos_sigma_m", "")
+            else:
+                # LG580P logs speed_kph; Watson logs velocity_kph — accept either.
+                velocity_kph = row.get("velocity_kph") or row.get("speed_kph") or ""
+                source = row.get("fix_quality_name", "")
+                sigma = ""
             rows.append(
                 {
                     "lat":          lat,
                     "lon":          lon,
                     "hdg":          hdg,
                     "host_time":    row.get("host_time", ""),
-                    # LG580P logs speed_kph; Watson logs velocity_kph — accept either.
-                    "velocity_kph": row.get("velocity_kph") or row.get("speed_kph") or "",
+                    "velocity_kph": velocity_kph,
+                    "source":       source,
+                    "sigma":        sigma,
                     "label":        row.get("label", ""),
                 }
             )
-    return rows
+    return rows, ("fused" if fused else "raw")
 
 
 # ── Per-frame geometry ─────────────────────────────────────────────────────────
-def compute_frames(rows: list[dict]) -> dict:
+def compute_frames(rows: list[dict], heading_offset_deg: float = HEADING_OFFSET_DEG) -> dict:
     """Pre-compute all display geometry in local metres.
 
     Position (lat/lon) is the MAIN (left) antenna. The reported heading is
-    corrected to true forward (HEADING_OFFSET_DEG) and everything else is placed
-    in the mower body frame relative to the main antenna.
+    corrected to true forward (``heading_offset_deg`` — see
+    ``DEFAULT_HEADING_OFFSET``) and everything else is placed in the mower body
+    frame relative to the main antenna.
     """
     lat0 = sum(r["lat"] for r in rows) / len(rows)
     lon0 = sum(r["lon"] for r in rows) / len(rows)
@@ -146,7 +179,7 @@ def compute_frames(rows: list[dict]) -> dict:
 
     for r in rows:
         E, N   = _lat_lon_to_en(r["lat"], r["lon"], lat0, lon0)
-        hdg    = (r["hdg"] + HEADING_OFFSET_DEG) % 360.0
+        hdg    = (r["hdg"] + heading_offset_deg) % 360.0
         fx, fy = _forward_unit(hdg)
         rx, ry = _right_unit(hdg)
 
@@ -203,14 +236,18 @@ def _swept_quads(geom: dict, max_seg_m: float = 5.0) -> list[np.ndarray]:
 
 
 # ── Viewer ─────────────────────────────────────────────────────────────────────
-def view(path: Path) -> None:
-    rows = load_csv(path)
+def view(path: Path, heading_offset: float | None = None) -> None:
+    rows, fmt = load_csv(path)
     if not rows:
         print("No frames with GPS fix + heading found in the file.", file=sys.stderr)
         sys.exit(1)
 
+    offset = heading_offset if heading_offset is not None else DEFAULT_HEADING_OFFSET[fmt]
     n    = len(rows)
-    geom = compute_frames(rows)
+    # ASCII only — some Windows consoles are cp1252 and crash on deg/middot.
+    print(f"Loaded {n} frames | {fmt} format | heading offset {offset:+.0f} deg",
+          file=sys.stderr)
+    geom = compute_frames(rows, offset)
 
     # ── Figure layout ────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(11, 9))
@@ -365,9 +402,15 @@ def view(path: Path) -> None:
         # Status line in title
         r = rows[idx]
         vel = f"{float(r['velocity_kph']):.1f} km/h" if r["velocity_kph"] else "-- km/h"
+        # Solution context: fix-quality name (raw) or EKF source + 1-sigma (fused).
+        extra = ""
+        if r.get("source"):
+            extra = f"   {r['source']}"
+            if r.get("sigma"):
+                extra += f" ±{r['sigma']}m"
         ax.set_title(
             f"{path.name}   frame {idx + 1}/{n}   hdg {hdg:.1f}° (fwd)   "
-            f"{vel}   {r['host_time'][:19]}"
+            f"{vel}{extra}   {r['host_time'][:19]}"
         )
         fig.canvas.draw_idle()
 
@@ -401,8 +444,12 @@ def view(path: Path) -> None:
 
 # ── Entry point ────────────────────────────────────────────────────────────────
 def main() -> None:
-    parser = argparse.ArgumentParser(description="View a mowing run CSV (LG580P or Watson).")
+    parser = argparse.ArgumentParser(
+        description="View a mowing run CSV (raw LG580P/Watson or fused EKF log).")
     parser.add_argument("csv", nargs="?", help="Path to CSV file (opens file dialog if omitted)")
+    parser.add_argument("--heading-offset", type=float, default=None,
+                        help="degrees added to the logged heading to get vehicle-forward "
+                             "(default: -90 for raw logs, 0 for fused logs)")
     args = parser.parse_args()
 
     if args.csv:
@@ -430,7 +477,7 @@ def main() -> None:
         print(f"File not found: {path}", file=sys.stderr)
         sys.exit(1)
 
-    view(path)
+    view(path, args.heading_offset)
 
 
 if __name__ == "__main__":
