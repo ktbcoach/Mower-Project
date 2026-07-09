@@ -5,7 +5,8 @@ Mower run viewer.
 Loads a raw LG580P/Watson CSV *or* a fused EKF CSV (`lg580p fuse`) — the format
 is auto-detected — and displays:
   - Green shaded area  : total swept blade path (54-inch cut)
-  - Red line           : mower centre track
+  - Centre track       : coloured by solution quality (green=RTK-fixed,
+                         amber=float, red=coast/IMU dead-reckon)
   - Black line + arrow : antenna baseline and forward heading at the slider position
   - Slider             : scrub through every logged frame
 
@@ -28,7 +29,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.widgets import Slider
 
 # ── Mower geometry (LG580P dual-antenna mounting) ───────────────────────────────
@@ -104,6 +105,35 @@ def _right_unit(heading_deg: float) -> tuple[float, float]:
 # applied (fuse's --heading-offset defaults to -90, matching this file), so its
 # heading is already forward — apply 0. Override either with --heading-offset.
 DEFAULT_HEADING_OFFSET = {"raw": HEADING_OFFSET_DEG, "fused": 0.0}
+
+# Centre-track colouring by solution quality. ``source`` is the fused
+# solution_source (rtk_fixed/float/coast/coast_stale) or, for a raw log, the GGA
+# fix_quality_name. Each track segment takes the colour of its *worse* endpoint
+# (by _SEVERITY), so a single float/coast sample stands out. Unknown/blank → grey.
+QUALITY_COLORS = {
+    "rtk_fixed":   "#1b7f3b",   # green  — RTK fixed
+    "rtk_float":   "#e8a33d",   # amber  — RTK float
+    "coast":       "#e02020",   # red    — IMU dead-reckon (GNSS gap)
+    "coast_stale": "#a01515",   # dark red — coasted past coast-max
+    "dgps":        "#f1c40f",   # yellow
+    "gps":         "#f1c40f",
+    "no_fix":      "#888888",
+}
+_NEUTRAL = "#555555"
+_SEVERITY = {"rtk_fixed": 0, "dgps": 1, "gps": 1, "no_fix": 1,
+             "rtk_float": 2, "coast": 3, "coast_stale": 4}
+# Legend order (worst last) — only qualities present in the file are shown.
+_QUALITY_ORDER = ["rtk_fixed", "dgps", "gps", "rtk_float", "coast", "coast_stale", "no_fix"]
+
+
+def _severity(source: str) -> int:
+    return _SEVERITY.get(source, 0)
+
+
+def _segment_color(src_a: str, src_b: str) -> str:
+    """Colour for the track segment between two samples: the worse endpoint's."""
+    worse = src_a if _severity(src_a) >= _severity(src_b) else src_b
+    return QUALITY_COLORS.get(worse, _NEUTRAL)
 
 
 # ── CSV loading ────────────────────────────────────────────────────────────────
@@ -273,9 +303,16 @@ def view(path: Path, heading_offset: float | None = None) -> None:
         )
         ax.add_collection(sweep)
 
-    # Red centre track
-    ax.plot(geom["centres"][:, 0], geom["centres"][:, 1],
-            color="red", linewidth=1.5, zorder=3)
+    # Centre track, coloured per-segment by solution quality (green=fixed,
+    # amber=float, red=coast) so degraded stretches stand out on the map.
+    pts = geom["centres"]
+    if len(pts) >= 2:
+        sources = [r.get("source", "") for r in rows]
+        segs = np.stack([pts[:-1], pts[1:]], axis=1)
+        seg_colors = [_segment_color(sources[i], sources[i + 1])
+                      for i in range(len(pts) - 1)]
+        ax.add_collection(LineCollection(segs, colors=seg_colors,
+                                         linewidths=1.6, zorder=3))
 
     # Start / end markers
     ax.plot(*geom["centres"][0],  "go", markersize=7, zorder=4, label="Start")
@@ -422,10 +459,20 @@ def view(path: Path, heading_offset: float | None = None) -> None:
     slider.on_changed(lambda v: _update(int(v)))
 
     # ── Legend ───────────────────────────────────────────────────────────────
+    # Track-quality swatches: only the qualities actually present in this file.
+    present = {r.get("source", "") for r in rows}
+    track_entries = [
+        plt.Line2D([0], [0], color=QUALITY_COLORS[q], linewidth=2.5,
+                   label=f"Track: {q.replace('_', '-')}")
+        for q in _QUALITY_ORDER if q in present
+    ]
+    if not track_entries:  # a file with no quality info — plain neutral track
+        track_entries = [plt.Line2D([0], [0], color=_NEUTRAL, linewidth=2.5,
+                                    label="Centre track")]
     legend_elements = [
         mpatches.Patch(facecolor="#4caf50", alpha=0.5,
                        label=f'Blade sweep (54" / {CUT_WIDTH_M:.2f} m)'),
-        plt.Line2D([0], [0], color="red",   linewidth=2, label="Centre track"),
+        *track_entries,
         plt.Line2D([0], [0], color="black", linewidth=2, label="Antenna baseline + heading"),
         mpatches.Patch(facecolor="#bbbbbb", edgecolor="#333333",
                        label="Deck (3 blades, 54\" cut)"),
