@@ -137,6 +137,9 @@ def parse(sentence: str) -> Optional[dict]:
             "hdop": _f(f[7]),
             "altitude_m": _f(f[8]),
             "geoid_sep_m": _f(f[10]) if len(f) > 10 else None,
+            # ...,geoidSep,M,ageOfDiff,refStationID  (f[12], f[13]).
+            "age_of_diff": _f(f[12]) if len(f) > 12 else None,
+            "ref_station_id": _i(f[13]) if len(f) > 13 else None,
         }
 
     if typ == "RMC" and len(f) >= 9:

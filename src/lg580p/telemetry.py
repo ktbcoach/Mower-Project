@@ -8,10 +8,12 @@ shares the same half-duplex link.
 Field order (all numeric, blank = unknown), XOR checksum like standard NMEA:
 
     $PRSTAT,seq,fixq,satsUsed,satsTracked,cn0Max,cn0Avg,lat,lon,alt,
-            hdg,hdgQ,hdop,speedKph,logging,corr*CS
+            hdg,hdgQ,hdop,speedKph,logging,corr[,ageOfDiff]*CS
 
 ``build_status_sentence`` (rover) and ``parse_status_sentence`` (base) are the
 two ends; keeping both here means the wire format has a single definition.
+Fields after ``corr`` are optional trailing extensions — an older rover that
+omits them still parses, so base and rover can be updated independently.
 """
 
 from __future__ import annotations
@@ -23,12 +25,15 @@ from . import nmea
 
 TALKER = "PRSTAT"
 
-# Field names in wire order (after the talker), for parsing.
-_FIELDS = (
+# Field names in wire order (after the talker), for parsing. Everything through
+# ``corr`` is the original required core; fields after it are optional trailing
+# extensions (a rover on the old format simply omits them).
+_CORE_FIELDS = (
     "seq", "fix_quality", "sats_used", "sats_tracked", "cn0_max", "cn0_avg",
     "latitude_deg", "longitude_deg", "altitude_m", "heading_deg",
     "heading_quality", "hdop", "speed_kph", "logging", "corr",
 )
+_FIELDS = _CORE_FIELDS + ("age_of_diff",)
 
 
 @dataclass
@@ -50,6 +55,7 @@ class RoverStatus:
     speed_kph: Optional[float] = None
     logging: Optional[bool] = None
     corr: Optional[bool] = None
+    age_of_diff: Optional[float] = None
 
     @property
     def fix_quality_name(self) -> Optional[str]:
@@ -103,6 +109,7 @@ def build_status_sentence(reading, seq: int, logging_on: bool, corr_flowing: boo
         _num(g("speed_kph"), ".1f"),
         _flag(logging_on),
         _flag(corr_flowing),
+        _num(g("age_of_diff"), ".1f"),
     ]
     body = TALKER + "," + ",".join(fields)
     return f"${body}*{_checksum(body)}"
@@ -115,9 +122,9 @@ def parse_status_sentence(line: str) -> Optional[RoverStatus]:
         return None
     star = line.rfind("*")
     parts = line[1:star].split(",")[1:]  # drop the talker
-    if len(parts) < len(_FIELDS):
+    if len(parts) < len(_CORE_FIELDS):
         return None
-    d = dict(zip(_FIELDS, parts))
+    d = dict(zip(_FIELDS, parts))  # extra trailing parts ignored; missing -> absent
 
     def _i(v):
         return int(v) if v not in ("", None) else None
@@ -144,4 +151,5 @@ def parse_status_sentence(line: str) -> Optional[RoverStatus]:
         speed_kph=_fl(d["speed_kph"]),
         logging=_b(d["logging"]),
         corr=_b(d["corr"]),
+        age_of_diff=_fl(d.get("age_of_diff")),
     )

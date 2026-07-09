@@ -45,6 +45,11 @@ class GnssReading:
     fix_quality: Optional[int] = None     # GGA quality code
     num_sats: Optional[int] = None
     hdop: Optional[float] = None
+    # Correction health (GGA): age of differential data (s) and reference
+    # station ID. Age climbing above a few seconds is the classic reason RTK
+    # stays Float instead of promoting to Fixed on a bandwidth-limited link.
+    age_of_diff: Optional[float] = None
+    ref_station_id: Optional[int] = None
     speed_kph: Optional[float] = None     # over ground
     course_deg: Optional[float] = None    # course over ground (track)
     # Dual-antenna heading (PQTMTAR) — populated once that parser is finalized.

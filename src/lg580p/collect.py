@@ -50,7 +50,8 @@ def _status(r) -> str:
     lon = f"{r.longitude_deg:.7f}" if r.longitude_deg is not None else "  ---.-------"
     hdg = f"{r.heading_deg:5.1f}" if r.heading_deg is not None else "  --.-"
     sats = f"{r.num_sats:2d}" if r.num_sats is not None else "--"
-    return f"{q:<9} sats={sats} lat={lat} lon={lon} hdg={hdg}"
+    age = f"{r.age_of_diff:4.1f}s" if r.age_of_diff is not None else "  --"
+    return f"{q:<9} sats={sats} lat={lat} lon={lon} hdg={hdg} age={age}"
 
 
 class _Session:

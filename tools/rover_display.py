@@ -56,6 +56,17 @@ def _cn0_color(cn0) -> str:
     return "#e74c3c"
 
 
+def _age_color(age) -> str:
+    """Correction age: fresh corrections are what let RTK promote to Fixed."""
+    if age is None:
+        return DIM
+    if age <= 2:
+        return "#2ecc71"   # fresh — healthy
+    if age <= 8:
+        return "#e67e22"   # aging — link may be too slow to Fix
+    return "#e74c3c"       # stale — corrections can't keep up
+
+
 class Dashboard:
     def __init__(self, root: tk.Tk, status_file: str):
         self.root = root
@@ -76,7 +87,8 @@ class Dashboard:
             ("Signal C/N0 avg", "cn0avg"),  ("HDOP", "hdop"),
             ("Latitude", "lat"),            ("Longitude", "lon"),
             ("Heading", "hdg"),             ("Speed", "speed"),
-            ("Corrections", "corr"),        ("Logging", "log"),
+            ("Corrections", "corr"),        ("Corr age", "corrage"),
+            ("Logging", "log"),
         ]
         for i, (title, key) in enumerate(layout):
             self._make_cell(grid, i // 2, i % 2, title, key)
@@ -151,6 +163,9 @@ class Dashboard:
         self.cells["corr"].config(
             text="--" if s.corr is None else ("FLOWING" if s.corr else "none"),
             fg="#2ecc71" if s.corr else FG)
+        self.cells["corrage"].config(
+            text="--" if s.age_of_diff is None else f"{s.age_of_diff:.1f} s",
+            fg=_age_color(s.age_of_diff))
         self.cells["log"].config(
             text="--" if s.logging is None else ("LOGGING" if s.logging else "idle"),
             fg="#2ecc71" if s.logging else FG)
